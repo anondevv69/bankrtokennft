@@ -17,8 +17,14 @@ contract MockBankrFeesManager is IBankrFees {
     mapping(address beneficiary => uint256 amount) public claimedFees0;
     mapping(address beneficiary => uint256 amount) public claimedFees1;
 
+    bool public noOpTransfers;
+
     error NotBeneficiary();
     error ZeroAddress();
+
+    function setNoOpTransfers(bool noOpTransfers_) external {
+        noOpTransfers = noOpTransfers_;
+    }
 
     function seedBeneficiary(bytes32 poolId, address beneficiary, uint256 shares_) external {
         if (beneficiary == address(0)) revert ZeroAddress();
@@ -35,6 +41,8 @@ contract MockBankrFeesManager is IBankrFees {
 
         uint256 currentShares = _shares[poolId][msg.sender];
         if (currentShares == 0) revert NotBeneficiary();
+
+        if (noOpTransfers) return;
 
         _shares[poolId][msg.sender] = 0;
         _shares[poolId][newBeneficiary] = currentShares;
@@ -98,11 +106,13 @@ contract BankrEscrowTestTest is Test {
         escrow = new BankrEscrowTest(ADMIN);
 
         feesManager.seedBeneficiary(POOL_ID, SELLER, FULL_SHARE);
+
+        vm.prank(ADMIN);
+        escrow.setFeeManagerAllowed(address(feesManager), true);
     }
 
-    function testDepositAndReleaseRights() public {
-        _transferRightsToEscrow();
-        _depositRights();
+    function testPrepareFinalizeAndReleaseRights() public {
+        _escrowRights();
 
         assertEq(escrow.originalOwner(POOL_ID), SELLER);
         assertEq(escrow.feeManagerForPool(POOL_ID), address(feesManager));
@@ -120,8 +130,7 @@ contract BankrEscrowTestTest is Test {
     }
 
     function testClaimFeesWhileEscrowOwnsRights() public {
-        _transferRightsToEscrow();
-        _depositRights();
+        _escrowRights();
 
         feesManager.accrueFees(POOL_ID, 3 ether, 5 ether);
 
@@ -134,6 +143,8 @@ contract BankrEscrowTestTest is Test {
         assertEq(claimed1, 5 ether);
         assertEq(feesManager.claimedFees0(address(escrow)), 3 ether);
         assertEq(feesManager.claimedFees1(address(escrow)), 5 ether);
+        assertEq(escrow.accruedFees0(POOL_ID), 3 ether);
+        assertEq(escrow.accruedFees1(POOL_ID), 5 ether);
 
         (claimable0, claimable1) = escrow.getClaimableFees(POOL_ID);
         assertEq(claimable0, 0);
@@ -141,8 +152,7 @@ contract BankrEscrowTestTest is Test {
     }
 
     function testSellerCancelReturnsRightsAndClearsState() public {
-        _transferRightsToEscrow();
-        _depositRights();
+        _escrowRights();
 
         vm.prank(SELLER);
         escrow.cancelRights(POOL_ID);
@@ -154,10 +164,12 @@ contract BankrEscrowTestTest is Test {
         assertFalse(escrow.isEscrowed(POOL_ID));
     }
 
-    function testCannotDepositIfEscrowDoesNotOwnRights() public {
+    function testCannotFinalizeIfEscrowDoesNotOwnRights() public {
+        _prepareDeposit();
+
         vm.prank(SELLER);
         vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.EscrowDoesNotOwnRights.selector, POOL_ID));
-        escrow.depositRights(address(feesManager), POOL_ID, SELLER);
+        escrow.finalizeDeposit(POOL_ID);
     }
 
     function testCannotReleaseUnknownPool() public {
@@ -167,8 +179,7 @@ contract BankrEscrowTestTest is Test {
     }
 
     function testCannotReleaseToZeroAddress() public {
-        _transferRightsToEscrow();
-        _depositRights();
+        _escrowRights();
 
         vm.prank(ADMIN);
         vm.expectRevert(BankrEscrowTest.ZeroAddress.selector);
@@ -176,8 +187,7 @@ contract BankrEscrowTestTest is Test {
     }
 
     function testUnauthorizedReleaseIsBlocked() public {
-        _transferRightsToEscrow();
-        _depositRights();
+        _escrowRights();
 
         vm.prank(ATTACKER);
         vm.expectRevert();
@@ -187,13 +197,102 @@ contract BankrEscrowTestTest is Test {
         assertEq(feesManager.getShares(POOL_ID, BUYER), 0);
     }
 
+    function testMisattributionAttackCannotFinalize() public {
+        _prepareDeposit();
+        _transferRightsToEscrow();
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.UnauthorizedCaller.selector, ATTACKER));
+        escrow.finalizeDeposit(POOL_ID);
+
+        assertEq(escrow.originalOwner(POOL_ID), address(0));
+        assertFalse(escrow.isEscrowed(POOL_ID));
+
+        vm.prank(SELLER);
+        escrow.finalizeDeposit(POOL_ID);
+
+        assertEq(escrow.originalOwner(POOL_ID), SELLER);
+        assertTrue(escrow.isEscrowed(POOL_ID));
+    }
+
+    function testCannotFinalizeWithoutPreparedDeposit() public {
+        _transferRightsToEscrow();
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.DepositNotPrepared.selector, POOL_ID));
+        escrow.finalizeDeposit(POOL_ID);
+    }
+
+    function testUnauthorizedFinalizeIsBlocked() public {
+        _prepareDeposit();
+        _transferRightsToEscrow();
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.UnauthorizedCaller.selector, ATTACKER));
+        escrow.finalizeDeposit(POOL_ID);
+    }
+
+    function testRejectsNonAllowlistedFeeManager() public {
+        MockBankrFeesManager fakeManager = new MockBankrFeesManager();
+        fakeManager.seedBeneficiary(POOL_ID, SELLER, FULL_SHARE);
+
+        vm.prank(SELLER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.FeeManagerNotAllowed.selector, address(fakeManager)));
+        escrow.prepareDeposit(address(fakeManager), POOL_ID);
+    }
+
+    function testPrepareRequiresCallerToOwnRights() public {
+        vm.prank(ATTACKER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.CallerDoesNotOwnRights.selector, POOL_ID));
+        escrow.prepareDeposit(address(feesManager), POOL_ID);
+    }
+
+    function testRevertWhenReleaseTransferVerificationFails() public {
+        _escrowRights();
+        feesManager.setNoOpTransfers(true);
+
+        vm.prank(ADMIN);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.TransferVerificationFailed.selector, POOL_ID, BUYER));
+        escrow.releaseRights(POOL_ID, BUYER);
+
+        assertEq(feesManager.getShares(POOL_ID, address(escrow)), FULL_SHARE);
+        assertEq(feesManager.getShares(POOL_ID, BUYER), 0);
+        assertEq(escrow.originalOwner(POOL_ID), SELLER);
+        assertTrue(escrow.isEscrowed(POOL_ID));
+    }
+
+    function testRevertWhenCancelTransferVerificationFails() public {
+        _escrowRights();
+        feesManager.setNoOpTransfers(true);
+
+        vm.prank(SELLER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.TransferVerificationFailed.selector, POOL_ID, SELLER));
+        escrow.cancelRights(POOL_ID);
+
+        assertEq(feesManager.getShares(POOL_ID, address(escrow)), FULL_SHARE);
+        assertEq(feesManager.getShares(POOL_ID, SELLER), 0);
+        assertEq(escrow.originalOwner(POOL_ID), SELLER);
+        assertTrue(escrow.isEscrowed(POOL_ID));
+    }
+
+    function _escrowRights() private {
+        _prepareDeposit();
+        _transferRightsToEscrow();
+        _finalizeDeposit();
+    }
+
+    function _prepareDeposit() private {
+        vm.prank(SELLER);
+        escrow.prepareDeposit(address(feesManager), POOL_ID);
+    }
+
     function _transferRightsToEscrow() private {
         vm.prank(SELLER);
         feesManager.updateBeneficiary(POOL_ID, address(escrow));
     }
 
-    function _depositRights() private {
+    function _finalizeDeposit() private {
         vm.prank(SELLER);
-        escrow.depositRights(address(feesManager), POOL_ID, SELLER);
+        escrow.finalizeDeposit(POOL_ID);
     }
 }

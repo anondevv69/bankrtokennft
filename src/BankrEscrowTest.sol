@@ -11,6 +11,15 @@ import {IBankrFees} from "./interfaces/IBankrFees.sol";
 /// settle purchases. It only proves that fee rights can be held by a contract,
 /// claimed while escrowed, and transferred back out by the contract.
 contract BankrEscrowTest is Ownable, ReentrancyGuard {
+    /// @notice Fee managers approved for escrow registration.
+    mapping(address feeManager => bool allowed) public allowedFeeManager;
+
+    /// @notice Seller that pre-registered a deposit before transferring rights to escrow.
+    mapping(bytes32 poolId => address seller) public pendingSeller;
+
+    /// @notice Fee manager attached to a pre-registered deposit.
+    mapping(bytes32 poolId => address feeManager) public pendingFeeManagerForPool;
+
     /// @notice Original seller for each escrowed Bankr pool.
     mapping(bytes32 poolId => address seller) public originalOwner;
 
@@ -19,6 +28,18 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
 
     /// @notice True when a pool's Bankr fee rights are registered in escrow.
     mapping(bytes32 poolId => bool escrowed) public isEscrowed;
+
+    /// @notice Token0 fees claimed by escrow while each pool is active.
+    mapping(bytes32 poolId => uint256 amount) public accruedFees0;
+
+    /// @notice Token1 fees claimed by escrow while each pool is active.
+    mapping(bytes32 poolId => uint256 amount) public accruedFees1;
+
+    /// @notice Emitted when the owner changes fee manager allowlist status.
+    event FeeManagerAllowlistUpdated(address indexed feeManager, bool allowed);
+
+    /// @notice Emitted after a seller pre-registers intent to escrow rights.
+    event DepositPrepared(bytes32 indexed poolId, address indexed feeManager, address indexed seller);
 
     /// @notice Emitted after escrow custody is verified and recorded.
     event RightsDeposited(bytes32 indexed poolId, address indexed feeManager, address indexed originalOwner);
@@ -34,33 +55,69 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
 
     error ZeroAddress();
     error RightsAlreadyEscrowed(bytes32 poolId);
+    error DepositAlreadyPending(bytes32 poolId);
+    error DepositNotPrepared(bytes32 poolId);
     error RightsNotEscrowed(bytes32 poolId);
     error EscrowDoesNotOwnRights(bytes32 poolId);
+    error CallerDoesNotOwnRights(bytes32 poolId);
+    error FeeManagerNotAllowed(address feeManager);
+    error TransferVerificationFailed(bytes32 poolId, address expectedBeneficiary);
     error UnauthorizedCaller(address caller);
 
     /// @param initialOwner Admin address allowed to release rights in this proof of concept.
     constructor(address initialOwner) Ownable(initialOwner) {}
 
-    /// @notice Records a Bankr fee-right position after the seller transfers it to this escrow.
-    /// @dev The seller/current beneficiary must first call Bankr's
-    /// `updateBeneficiary(poolId, address(this))` on `feeManager`. This function
-    /// only verifies and records custody; it cannot pull rights from the seller.
+    /// @notice Allows or blocks a Bankr fee manager for escrow deposits.
+    /// @param feeManager Fee manager address to update.
+    /// @param allowed True to allow deposits from the manager, false to block them.
+    function setFeeManagerAllowed(address feeManager, bool allowed) external onlyOwner {
+        if (feeManager == address(0)) revert ZeroAddress();
+
+        allowedFeeManager[feeManager] = allowed;
+
+        emit FeeManagerAllowlistUpdated(feeManager, allowed);
+    }
+
+    /// @notice Pre-registers a seller before they transfer Bankr fee rights to escrow.
+    /// @dev This closes the attribution race where rights already in escrow could
+    /// otherwise be claimed by an unrelated caller. The seller must still call
+    /// Bankr's `updateBeneficiary(poolId, address(this))` after this step.
     /// @param feeManager Bankr fee manager contract for the token pool.
     /// @param poolId Stable Bankr pool identifier for the fee-right position.
-    /// @param originalOwner_ Seller that transferred the rights into escrow.
-    function depositRights(address feeManager, bytes32 poolId, address originalOwner_) external nonReentrant {
-        if (feeManager == address(0) || originalOwner_ == address(0)) revert ZeroAddress();
+    function prepareDeposit(address feeManager, bytes32 poolId) external nonReentrant {
+        if (feeManager == address(0)) revert ZeroAddress();
+        if (!allowedFeeManager[feeManager]) revert FeeManagerNotAllowed(feeManager);
         if (isEscrowed[poolId]) revert RightsAlreadyEscrowed(poolId);
-        if (msg.sender != originalOwner_) revert UnauthorizedCaller(msg.sender);
+        if (pendingSeller[poolId] != address(0)) revert DepositAlreadyPending(poolId);
 
+        uint256 sellerShare = IBankrFees(feeManager).getShares(poolId, msg.sender);
+        if (sellerShare == 0) revert CallerDoesNotOwnRights(poolId);
+
+        pendingSeller[poolId] = msg.sender;
+        pendingFeeManagerForPool[poolId] = feeManager;
+
+        emit DepositPrepared(poolId, feeManager, msg.sender);
+    }
+
+    /// @notice Activates escrow after the pre-registered seller transfers Bankr rights here.
+    /// @dev Only the seller recorded by `prepareDeposit` can finalize. This
+    /// function verifies that escrow owns shares before recording active custody.
+    /// @param poolId Stable Bankr pool identifier for the fee-right position.
+    function finalizeDeposit(bytes32 poolId) external nonReentrant {
+        address seller = pendingSeller[poolId];
+        if (seller == address(0)) revert DepositNotPrepared(poolId);
+        if (msg.sender != seller) revert UnauthorizedCaller(msg.sender);
+
+        address feeManager = pendingFeeManagerForPool[poolId];
         uint256 escrowShare = IBankrFees(feeManager).getShares(poolId, address(this));
         if (escrowShare == 0) revert EscrowDoesNotOwnRights(poolId);
 
-        originalOwner[poolId] = originalOwner_;
+        originalOwner[poolId] = seller;
         feeManagerForPool[poolId] = feeManager;
         isEscrowed[poolId] = true;
+        _clearPendingDeposit(poolId);
 
-        emit RightsDeposited(poolId, feeManager, originalOwner_);
+        emit RightsDeposited(poolId, feeManager, seller);
     }
 
     /// @notice Releases escrowed Bankr fee rights to `to`.
@@ -73,6 +130,7 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
 
         address feeManager = _requireEscrowed(poolId);
         IBankrFees(feeManager).updateBeneficiary(poolId, to);
+        _verifyTransferred(poolId, feeManager, to);
         _clearEscrow(poolId);
 
         emit RightsReleased(poolId, feeManager, to);
@@ -88,6 +146,7 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
         if (msg.sender != seller && msg.sender != owner()) revert UnauthorizedCaller(msg.sender);
 
         IBankrFees(feeManager).updateBeneficiary(poolId, seller);
+        _verifyTransferred(poolId, feeManager, seller);
         _clearEscrow(poolId);
 
         emit RightsCancelled(poolId, feeManager, seller);
@@ -101,6 +160,8 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
         address feeManager = _requireEscrowed(poolId);
 
         (fees0, fees1) = IBankrFees(feeManager).collectFees(poolId);
+        accruedFees0[poolId] += fees0;
+        accruedFees1[poolId] += fees1;
 
         emit FeesClaimed(poolId, feeManager, fees0, fees1);
     }
@@ -124,16 +185,28 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
         IBankrFees fees = IBankrFees(feeManager);
 
         uint256 shares = fees.getShares(poolId, address(this));
-        fees0 =
-            ((fees.getCumulatedFees0(poolId) - fees.getLastCumulatedFees0(poolId, address(this))) * shares) / 1e18;
-        fees1 =
-            ((fees.getCumulatedFees1(poolId) - fees.getLastCumulatedFees1(poolId, address(this))) * shares) / 1e18;
+        fees0 = ((fees.getCumulatedFees0(poolId) - fees.getLastCumulatedFees0(poolId, address(this))) * shares) / 1e18;
+        fees1 = ((fees.getCumulatedFees1(poolId) - fees.getLastCumulatedFees1(poolId, address(this))) * shares) / 1e18;
     }
 
     /// @dev Loads the fee manager for a registered escrow position.
     function _requireEscrowed(bytes32 poolId) internal view returns (address feeManager) {
         if (!isEscrowed[poolId]) revert RightsNotEscrowed(poolId);
         feeManager = feeManagerForPool[poolId];
+    }
+
+    /// @dev Verifies Bankr fee rights left escrow and arrived at the expected beneficiary.
+    function _verifyTransferred(bytes32 poolId, address feeManager, address expectedBeneficiary) internal view {
+        IBankrFees fees = IBankrFees(feeManager);
+        if (fees.getShares(poolId, address(this)) != 0 || fees.getShares(poolId, expectedBeneficiary) == 0) {
+            revert TransferVerificationFailed(poolId, expectedBeneficiary);
+        }
+    }
+
+    /// @dev Clears pending registration after escrow custody is finalized.
+    function _clearPendingDeposit(bytes32 poolId) internal {
+        delete pendingSeller[poolId];
+        delete pendingFeeManagerForPool[poolId];
     }
 
     /// @dev Clears local escrow state after Bankr accepts the beneficiary transfer.
