@@ -36,7 +36,7 @@ CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" 0x7Cd24
 
 ## Forge Verification Command
 
-Use BaseScan's Base Sepolia API endpoint:
+Use Foundry's Etherscan verifier with Base Sepolia chain ID. Do not pass the old BaseScan V1 `--verifier-url`; it is deprecated and can fail with a V2 migration error.
 
 ```bash
 source .env
@@ -45,12 +45,17 @@ CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" 0x7Cd24
 ~/.foundry/bin/forge verify-contract \
   0xFb28D9C636514f8a9D129873750F9b886707d95F \
   src/BankrEscrowTest.sol:BankrEscrowTest \
-  --chain-id 84532 \
+  --chain 84532 \
   --verifier etherscan \
-  --verifier-url https://api-sepolia.basescan.org/api \
   --etherscan-api-key $ETHERSCAN_API_KEY \
   --constructor-args $CONSTRUCTOR_ARGS \
   --watch
+```
+
+Successful verification URL:
+
+```text
+https://sepolia.basescan.org/address/0xfb28d9c636514f8a9d129873750f9b886707d95f
 ```
 
 ## Dry Verification Prep

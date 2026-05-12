@@ -74,6 +74,32 @@ Use `INTEGRATION_NOTES.md` to record live Bankr custody tests:
 prepareDeposit -> Bankr updateBeneficiary -> finalizeDeposit -> claim/cancel/release
 ```
 
+### Doppler SDK Test Launch
+
+Use the Doppler SDK scripts to create a Base Sepolia test launch and discover whether the resulting fee manager is compatible with the Bankr fee-rights escrow ABI.
+
+```shell
+$ npm run doppler:simulate
+$ npm run doppler:execute
+```
+
+`doppler:simulate` does not broadcast. `doppler:execute` broadcasts a Base Sepolia launch and prints the token address, pool ID, transaction hash, and candidate fee-manager share reads.
+The helper defaults `DOPPLER_GAS_LIMIT` to `10500000`; override it only if the simulation estimate changes materially.
+
+After a launch, set these values in your shell or `.env`:
+
+```shell
+FEE_MANAGER=0x...
+POOL_ID=0x...
+SELLER=0x...
+```
+
+Then probe compatibility:
+
+```shell
+$ npm run doppler:probe
+```
+
 ### Cast
 
 ```shell
