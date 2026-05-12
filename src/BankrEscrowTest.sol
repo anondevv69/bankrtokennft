@@ -41,6 +41,9 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
     /// @notice Emitted after a seller pre-registers intent to escrow rights.
     event DepositPrepared(bytes32 indexed poolId, address indexed feeManager, address indexed seller);
 
+    /// @notice Emitted after a seller cancels a pending deposit before transfer/finalization.
+    event PendingDepositCancelled(bytes32 indexed poolId, address indexed seller);
+
     /// @notice Emitted after escrow custody is verified and recorded.
     event RightsDeposited(bytes32 indexed poolId, address indexed feeManager, address indexed originalOwner);
 
@@ -59,6 +62,7 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
     error DepositNotPrepared(bytes32 poolId);
     error RightsNotEscrowed(bytes32 poolId);
     error EscrowDoesNotOwnRights(bytes32 poolId);
+    error EscrowAlreadyOwnsRights(bytes32 poolId);
     error CallerDoesNotOwnRights(bytes32 poolId);
     error FeeManagerNotAllowed(address feeManager);
     error TransferVerificationFailed(bytes32 poolId, address expectedBeneficiary);
@@ -118,6 +122,25 @@ contract BankrEscrowTest is Ownable, ReentrancyGuard {
         _clearPendingDeposit(poolId);
 
         emit RightsDeposited(poolId, feeManager, seller);
+    }
+
+    /// @notice Cancels a pending deposit before escrow custody is finalized.
+    /// @dev If rights were already transferred into escrow, the seller must
+    /// finalize the deposit and then use `cancelRights`; clearing pending state
+    /// after transfer would orphan the rights in this PoC.
+    /// @param poolId Stable Bankr pool identifier for the pending deposit.
+    function cancelPendingDeposit(bytes32 poolId) external nonReentrant {
+        address seller = pendingSeller[poolId];
+        if (seller == address(0)) revert DepositNotPrepared(poolId);
+        if (msg.sender != seller) revert UnauthorizedCaller(msg.sender);
+
+        address feeManager = pendingFeeManagerForPool[poolId];
+        uint256 escrowShare = IBankrFees(feeManager).getShares(poolId, address(this));
+        if (escrowShare != 0) revert EscrowAlreadyOwnsRights(poolId);
+
+        _clearPendingDeposit(poolId);
+
+        emit PendingDepositCancelled(poolId, seller);
     }
 
     /// @notice Releases escrowed Bankr fee rights to `to`.

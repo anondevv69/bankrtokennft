@@ -20,7 +20,7 @@ The first critical attribution race found in the original PoC has been fixed. Th
 4. Seller calls `finalizeDeposit(poolId)`.
 5. Escrow verifies `getShares(poolId, address(this)) > 0`, records active custody, and clears pending state.
 
-The test suite now covers the original misattribution attack, unauthorized finalize, fake/non-allowlisted fee managers, failed outbound transfer verification, and claimed-fee accounting.
+The test suite now covers the original misattribution attack, unauthorized finalize, fake/non-allowlisted fee managers, failed outbound transfer verification, claimed-fee accounting, pending-deposit cancellation, and repeated prepare/cancel cycles.
 
 ## Fixed Findings
 
@@ -78,6 +78,20 @@ Fix:
 - Added tests for fee accounting correctness.
 
 Remaining risk: actual ERC20/native asset withdrawal and final entitlement rules are not implemented yet. See `H-01`.
+
+### F-05: Pending deposits could remain stuck
+
+**Original severity:** Medium
+
+Original issue: `prepareDeposit` could leave pending state forever if the seller abandoned the flow before transferring rights.
+
+Fix:
+
+- Added `cancelPendingDeposit`.
+- Only the pending seller can cancel.
+- Pending state is cleared safely before rights are transferred.
+- Cancellation is blocked after rights have already been transferred to escrow to avoid orphaning custody.
+- Added tests for successful cancellation, unauthorized cancellation, finalize-after-cancel failure, repeated prepare/cancel cycles, and post-transfer cancellation rejection.
 
 ## Critical Findings
 
@@ -143,25 +157,17 @@ bytes32 positionId = keccak256(abi.encode(feeManager, poolId));
 
 Before supporting multiple Bankr/Clanker fee manager contracts, migrate escrow state to a `positionId`-keyed struct.
 
-### M-02: Pending deposits can remain stuck
+### M-02: Unregistered transfers can still orphan rights
 
 **Severity:** Medium
 
-`prepareDeposit` creates pending state. If the seller never transfers rights or never finalizes, the pending deposit remains and blocks another prepare for that pool.
+If a seller transfers rights to escrow without calling `prepareDeposit` first, the escrow owns rights but has no active or pending state to release them.
 
-Also, if a seller transfers rights to escrow without calling `prepareDeposit` first, the escrow owns rights but has no active or pending state to release them.
-
-**Impact:** Operational mistakes can block or orphan a test escrow flow.
+**Impact:** Operational mistakes can orphan a test escrow flow.
 
 **Recommended fix before broader testing:**
 
-Add a pending-deposit cancellation path:
-
-- seller can cancel before transferring rights,
-- owner can clear expired pending deposits,
-- optional timeout on pending state.
-
-For mistakenly transferred unregistered rights, consider a tightly controlled rescue function for testnet only.
+For mistakenly transferred unregistered rights, consider a tightly controlled rescue function for testnet only. The UI/operator flow should also make the order explicit: prepare first, transfer second, finalize third.
 
 ### M-03: `getClaimableFees` remains an estimate
 

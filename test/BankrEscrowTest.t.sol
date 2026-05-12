@@ -232,6 +232,65 @@ contract BankrEscrowTestTest is Test {
         escrow.finalizeDeposit(POOL_ID);
     }
 
+    function testCancelPendingDeposit() public {
+        _prepareDeposit();
+
+        vm.prank(SELLER);
+        escrow.cancelPendingDeposit(POOL_ID);
+
+        assertEq(escrow.pendingSeller(POOL_ID), address(0));
+        assertEq(escrow.pendingFeeManagerForPool(POOL_ID), address(0));
+        assertFalse(escrow.isEscrowed(POOL_ID));
+    }
+
+    function testUnauthorizedPendingDepositCancellationIsBlocked() public {
+        _prepareDeposit();
+
+        vm.prank(ATTACKER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.UnauthorizedCaller.selector, ATTACKER));
+        escrow.cancelPendingDeposit(POOL_ID);
+
+        assertEq(escrow.pendingSeller(POOL_ID), SELLER);
+        assertEq(escrow.pendingFeeManagerForPool(POOL_ID), address(feesManager));
+    }
+
+    function testCannotFinalizeAfterPendingDepositCancellation() public {
+        _prepareDeposit();
+
+        vm.prank(SELLER);
+        escrow.cancelPendingDeposit(POOL_ID);
+
+        _transferRightsToEscrow();
+
+        vm.prank(SELLER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.DepositNotPrepared.selector, POOL_ID));
+        escrow.finalizeDeposit(POOL_ID);
+    }
+
+    function testRepeatedPrepareCancelCycles() public {
+        _prepareDeposit();
+
+        vm.prank(SELLER);
+        escrow.cancelPendingDeposit(POOL_ID);
+
+        _prepareDeposit();
+
+        assertEq(escrow.pendingSeller(POOL_ID), SELLER);
+        assertEq(escrow.pendingFeeManagerForPool(POOL_ID), address(feesManager));
+    }
+
+    function testCannotCancelPendingDepositAfterRightsTransferred() public {
+        _prepareDeposit();
+        _transferRightsToEscrow();
+
+        vm.prank(SELLER);
+        vm.expectRevert(abi.encodeWithSelector(BankrEscrowTest.EscrowAlreadyOwnsRights.selector, POOL_ID));
+        escrow.cancelPendingDeposit(POOL_ID);
+
+        assertEq(escrow.pendingSeller(POOL_ID), SELLER);
+        assertEq(feesManager.getShares(POOL_ID, address(escrow)), FULL_SHARE);
+    }
+
     function testRejectsNonAllowlistedFeeManager() public {
         MockBankrFeesManager fakeManager = new MockBankrFeesManager();
         fakeManager.seedBeneficiary(POOL_ID, SELLER, FULL_SHARE);
