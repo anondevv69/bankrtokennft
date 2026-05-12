@@ -9,6 +9,23 @@
 - Chain ID: `84532`
 - Initial owner: `0x7Cd24462901Ca865e66fBe47de2208006D8a0F4D`
 
+`BankrEscrowV2` was deployed to Base Sepolia:
+
+- Contract: `0xDaA625F80c4beFB2b7c000519F0e503E4654F2BA`
+- Deployment transaction: `0x716ec1ef08b2e539377dd7a55208be9374c3b619080614da922645ec7eb8dc10`
+- Initial fee-manager allowlist transaction: `0xdb6cf8e7b9d63b936728c4ee365eebe018b61999b2796e7f672f22aa7023ab42`
+- Chain ID: `84532`
+- Initial owner: `0x7Cd24462901Ca865e66fBe47de2208006D8a0F4D`
+- Initial fee manager: `0x1718405E58c61425cDc0083262bC9f72198F5232`
+
+`TestFeeToken` was deployed to Base Sepolia as a laboratory ERC20:
+
+- Contract: `0xCCbfd0FC0cB16D705F7E3846FDfA319DBf8F92F4`
+- Transaction: `0x9beea8dedbe1b410e5eea62fdea38b54eed84d2c52e4e5ddfe4461439ef619f2`
+- Chain ID: `84532`
+- Initial supply: `1000000000000000000000000`
+- Deployer/initial holder: `0x7Cd24462901Ca865e66fBe47de2208006D8a0F4D`
+
 ## Required Environment
 
 Copy `.env.example` to `.env` and set:
@@ -56,6 +73,50 @@ Successful verification URL:
 
 ```text
 https://sepolia.basescan.org/address/0xfb28d9c636514f8a9d129873750f9b886707d95f
+```
+
+For V2, use:
+
+```bash
+source .env
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" 0x7Cd24462901Ca865e66fBe47de2208006D8a0F4D)
+
+~/.foundry/bin/forge verify-contract \
+  0xDaA625F80c4beFB2b7c000519F0e503E4654F2BA \
+  src/BankrEscrowV2.sol:BankrEscrowV2 \
+  --chain 84532 \
+  --verifier etherscan \
+  --etherscan-api-key $ETHERSCAN_API_KEY \
+  --constructor-args $CONSTRUCTOR_ARGS \
+  --watch
+```
+
+Successful V2 verification URL:
+
+```text
+https://sepolia.basescan.org/address/0xdaa625f80c4befb2b7c000519f0e503e4654f2ba
+```
+
+For the test token, use:
+
+```bash
+source .env
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(uint256)" 1000000000000000000000000)
+
+~/.foundry/bin/forge verify-contract \
+  0xCCbfd0FC0cB16D705F7E3846FDfA319DBf8F92F4 \
+  src/TestFeeToken.sol:TestFeeToken \
+  --chain 84532 \
+  --verifier etherscan \
+  --etherscan-api-key $ETHERSCAN_API_KEY \
+  --constructor-args $CONSTRUCTOR_ARGS \
+  --watch
+```
+
+Successful test token verification URL:
+
+```text
+https://sepolia.basescan.org/address/0xccbfd0fc0cb16d705f7e3846fdfa319dbf8f92f4
 ```
 
 ## Dry Verification Prep

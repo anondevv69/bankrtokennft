@@ -57,6 +57,17 @@ $ forge script script/DeployBankrEscrowTest.s.sol --rpc-url $BASE_SEPOLIA_RPC_UR
 
 The first `forge script` command simulates the deployment. Only add `--broadcast` after the dry run succeeds.
 
+Deploy the V2 escrow for live accounting tests:
+
+```shell
+$ source .env
+$ INITIAL_FEE_MANAGERS=0x1718405E58c61425cDc0083262bC9f72198F5232 \
+  ~/.foundry/bin/forge script script/DeployBankrEscrowV2.s.sol \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
+```
+
 Optional deployment variables:
 
 - `ESCROW_INITIAL_OWNER`: owner/admin for the deployed escrow. Defaults to the deployer address if unset.
@@ -66,12 +77,51 @@ Optional deployment variables:
 
 See `VERIFICATION.md` for the deployed Base Sepolia address, constructor args, and `forge verify-contract` command.
 
+### Deploy Test Fee Token
+
+`TestFeeToken` is a plain ERC20 laboratory token for controlled Base Sepolia integration testing. It is not a future protocol token.
+
+Current Base Sepolia deployment:
+
+```text
+TestFeeToken = 0xCCbfd0FC0cB16D705F7E3846FDfA319DBf8F92F4
+```
+
+```shell
+$ source .env
+$ ~/.foundry/bin/forge script script/DeployTestFeeToken.s.sol \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
+```
+
+Optional deployment variable:
+
+```shell
+TEST_FEE_TOKEN_INITIAL_SUPPLY=1000000000000000000000000
+```
+
+Default supply is `1,000,000 TFT` with 18 decimals. The token has no taxes, owner, transfer restrictions, or tokenomics.
+
 ### Integration Testing
 
 Use `INTEGRATION_NOTES.md` to record live Bankr custody tests:
 
 ```text
 prepareDeposit -> Bankr updateBeneficiary -> finalizeDeposit -> claim/cancel/release
+```
+
+For V2, `prepareDeposit` also requires token addresses:
+
+```text
+prepareDeposit(feeManager, poolId, token0, token1)
+```
+
+The live Doppler test pool uses:
+
+```text
+token0 = 0x4200000000000000000000000000000000000006
+token1 = 0x543f82143bAfd178C335Ce06745A3fE9e61Bcbc3
 ```
 
 ### Doppler SDK Test Launch

@@ -26,6 +26,7 @@
   "homepage": "https://github.com/anondevv69/bankrtokennft#readme",
   "dependencies": {
     "@whetstone-research/doppler-sdk": "^1.0.14",
+    "doppler-router": "^1.0.15",
     "dotenv": "^17.4.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",

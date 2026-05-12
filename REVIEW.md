@@ -20,7 +20,7 @@ The first critical attribution race found in the original PoC has been fixed. Th
 4. Seller calls `finalizeDeposit(poolId)`.
 5. Escrow verifies `getShares(poolId, address(this)) > 0`, records active custody, and clears pending state.
 
-The test suite now covers the original misattribution attack, unauthorized finalize, fake/non-allowlisted fee managers, failed outbound transfer verification, claimed-fee accounting, pending-deposit cancellation, and repeated prepare/cancel cycles.
+The test suite now covers the original misattribution attack, unauthorized finalize, fake/non-allowlisted fee managers, failed outbound transfer verification, pending-deposit cancellation, repeated prepare/cancel cycles, and V2 balance-delta fee accounting with withdrawal settlement.
 
 ## Fixed Findings
 
@@ -93,31 +93,49 @@ Fix:
 - Cancellation is blocked after rights have already been transferred to escrow to avoid orphaning custody.
 - Added tests for successful cancellation, unauthorized cancellation, finalize-after-cancel failure, repeated prepare/cancel cycles, and post-transfer cancellation rejection.
 
+### F-06: V2 balance-delta fee accounting
+
+**Original severity:** High
+
+Live Base Sepolia testing showed that `collectFees(poolId)` return values can differ from the actual token amounts received by escrow.
+
+Fix in `BankrEscrowV2`:
+
+- `prepareDeposit` records `token0` and `token1` for the pool.
+- `claimFees` reads escrow token balances before and after `collectFees`.
+- `accruedFees0` and `accruedFees1` are incremented by actual balance deltas.
+- `withdrawClaimedFees(poolId, recipient)` transfers claimed balances after rights are canceled or released.
+- Added tests for mismatched `collectFees` return values, multiple claims, partial shares, seller withdrawals, buyer withdrawals, wrong recipients, and premature withdrawals.
+
 ## Critical Findings
 
 No currently known critical findings remain in the custody PoC after the pre-registration fix.
 
 ## High Findings
 
-### H-01: Claimed assets still need withdrawal and entitlement rules
+### H-01: Production fee entitlement rules still need hardening
 
 **Severity:** High
 
-`claimFees(bytes32 poolId)` now records returned fee amounts in `accruedFees0` and `accruedFees1`, but the contract still does not transfer claimed token balances to the party entitled to them.
+`BankrEscrowV2` adds balance-delta accounting and `withdrawClaimedFees(poolId, recipient)`. For this PoC, fees claimed while escrow owns rights are withdrawable by the terminal fee recipient:
 
-This is intentionally incomplete for the custody PoC, but it is a deployment blocker for any real-value claim flow.
+- seller if escrow is canceled,
+- buyer/recipient if rights are released.
 
-**Impact:** Real claimed assets could remain in the contract without a safe withdrawal or settlement path.
+That is enough for live custody testing, but it is still not a complete production settlement model.
 
-**Recommended fix before claiming real fees:**
+**Impact:** Future marketplace flows could misallocate fees if sale timing, partial fills, refunds, splits, or disputed settlements are not modeled explicitly.
 
-Define who owns fees claimed during escrow:
+**Recommended fix before production:**
 
-- seller if the listing is canceled,
-- buyer if the rights are released/sold,
-- or split by explicit marketplace terms.
+Define the full fee entitlement rules for each marketplace state:
 
-Then add token-aware withdrawal logic that transfers the actual claimed assets, not just internal accounting.
+- listed but unsold,
+- offer accepted but not settled,
+- buy-now settlement,
+- cancellation,
+- release to buyer,
+- fee splits or protocol rake.
 
 ### H-02: Owner can still release escrowed rights to any address
 
