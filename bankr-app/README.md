@@ -58,15 +58,11 @@ npm run preview
 ## Deploy on Railway
 
 1. New **Railway** project → **Deploy from GitHub** → pick this repo.
-2. Set **Root Directory** to `bankr-app` (monorepo subfolder).
-3. **Nixpacks:** this folder includes `nixpacks.toml` (Node 20, `npm ci`, `npm run build`, `npm start`). If Railway does not pick it up, set **Custom Build Command** to `npm run build` and **Start Command** to `npm start`.
-4. In **Variables**, add at least:
-   - `VITE_MARKETPLACE_ADDRESS` = your deployed `FeeRightsFixedSale` on **Base**  
-   - Optionally `VITE_DEFAULT_RECEIPT_COLLECTION` = `BankrFeeRightsReceipt` on **Base**  
-   - **Recommended:** `VITE_RPC_URL` = your provider URL for Base mainnet  
-   - Optionally `VITE_CHAIN_ID=8453` (documentation parity only)
+2. Either leave the service root at the **repository root** (recommended with current `package.json`: root `build` / `start` call into `bankr-app`), **or** set **Root Directory** to `bankr-app` and use that folder’s `npm run build` / `npm start` only.
+3. **Nixpacks:** `bankr-app/nixpacks.toml` applies when the service root is `bankr-app`. From **repo root**, Railway uses the root `package.json` scripts instead.
+4. **Variables:** see **`RAILWAY.md`** (only `VITE_*` for the frontend; remove imported Foundry secrets).
 
-After deploy, open the public URL. The UI shows a **Base mainnet** banner and refuses other chains when a wallet is connected.
+After deploy, open the public URL. Wallets must use **Base** (chain 8453).
 
 ## Next steps to wire the Bankr app
 

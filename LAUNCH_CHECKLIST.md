@@ -115,4 +115,5 @@ Ugly UI, manual ops, and limited features **are** acceptable for the first cut.
 ## Related docs
 
 - `VERIFICATION.md` — Sepolia lab history + **Base mainnet** verify templates.
+- `RAILWAY.md` — variables to set / remove, fix for `index.js` crash, root vs `bankr-app` deploy.
 - `bankr-app/README.md` — Railway, env vars, `npm run verify`.

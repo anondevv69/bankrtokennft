@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**",
   "type": "module",
-  "main": "index.js",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "directories": {
     "lib": "lib",
     "test": "test"
   },
   "scripts": {
+    "build": "cd bankr-app && npm install && npm run build",
+    "start": "cd bankr-app && npm start",
     "doppler:simulate": "tsx scripts/doppler/create-base-sepolia-launch.ts",
     "doppler:execute": "EXECUTE=1 tsx scripts/doppler/create-base-sepolia-launch.ts",
     "doppler:probe": "tsx scripts/doppler/probe-fee-manager.ts"
@@ -23,7 +27,7 @@
   "bugs": {
     "url": "https://github.com/anondevv69/bankrtokennft/issues"
   },
-  "homepage": "https://github.com/anondevv69/bankrtokennft#readme",
+  "homepage": "https://github.com/anondevv69/bankrtokennft.git#readme",
   "dependencies": {
     "@whetstone-research/doppler-sdk": "^1.0.14",
     "doppler-router": "^1.0.15",
