@@ -25,9 +25,13 @@ https://book.getfoundry.sh/
 
 Authoritative scope and contributor notes: `MVP_ROADMAP.md`. **Production go-live:** `LAUNCH_CHECKLIST.md`. **Railway troubleshooting:** `RAILWAY.md`.
 
+### Bankr App (inside Bankr terminal)
+
+The **canonical “connected to Bankr” UX** is a **Bankr App** (`index.html` + optional `scripts/`) using the [Apps SDK](https://docs.bankr.bot/apps/sdk), not the standalone Vite bundle alone. See **`BANKR_APP.md`** for manifest permissions, event indexing, `bankr.chain` / `bankr.tx.prepare` patterns, and how that relates to `bankr-app/`.
+
 ### Bankr web app (`bankr-app/`)
 
-Vite + React + wagmi on **Base mainnet**: wallet connect, offers, list / cancel / buy. Set `VITE_MARKETPLACE_ADDRESS` (and optionally `VITE_DEFAULT_RECEIPT_COLLECTION`, `VITE_RPC_URL`) in `bankr-app/.env` — see `bankr-app/.env.example`. (Foundry workflows in this repo can still target Base Sepolia for lab deploys — see `VERIFICATION.md`.)
+Vite + React + wagmi on **Base mainnet**: wallet connect, offers, list / cancel / buy — **standalone** (browser wallet only; no `bankr` iframe global). Set `VITE_MARKETPLACE_ADDRESS` (and optionally `VITE_DEFAULT_RECEIPT_COLLECTION`, `VITE_RPC_URL`) in `bankr-app/.env` — see `bankr-app/.env.example`. (Foundry workflows in this repo can still target Base Sepolia for lab deploys — see `VERIFICATION.md`.)
 
 ```shell
 $ cd bankr-app && npm install && npm run dev

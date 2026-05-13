@@ -54,10 +54,12 @@ No auctions, royalties, protocol token, buybacks, or Bankr-specific hooks inside
 | `test/FeeRightsOffers.t.sol` | Offer / accept / withdraw paths |
 | `VERIFICATION.md` | BaseScan verify commands (Sepolia history + **mainnet** templates) |
 | `LAUNCH_CHECKLIST.md` | **Production go-live:** deploy → verify → Railway → E2E before public post |
+| `BANKR_APP.md` | **Bankr App** (Apps SDK): manifest permissions, logs, `tx.prepare` vs standalone `bankr-app/` |
 
 ## Next (not blocking the primitive)
 
-- Bankr mini app polish (`bankr-app/` is wired for **Base mainnet**; extend UX / escrow links as needed).
+- **Bankr App** (iframe + scripts, [SDK](https://docs.bankr.bot/apps/sdk)) — primary UX when “connected to Bankr”; spec: **`BANKR_APP.md`**. The repo **`bankr-app/`** remains a standalone wagmi surface for demos / Railway.
+- **`bankr-app/`** polish (browse listings, hide raw `listingId` via log index) for non-Bankr hosting.
 - Receipt metadata polish for secondary venues.
 
 ## For contributors

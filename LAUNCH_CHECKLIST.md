@@ -102,6 +102,20 @@ Run **one full live flow** yourself (two wallets):
 
 **Only after** this passes: tweet, Discord blast, open floodgates.
 
+### Bankr Marketplace seller step — fee beneficiary → escrow (preferred)
+
+The on-chain escrow flow still needs **`prepareDeposit`** then **`finalizeDeposit`** after the **fee manager** shows the escrow holding shares. The **beneficiary change** itself should **not** rely on “open Doppler and paste” when the user is in Bankr.
+
+Update the **Bankr Marketplace app** (seller wizard / `bankr-marketplace-v1`, not `fee-rights-exchange/bankr-app/` alone) to:
+
+1. **Copy:** Primary CTA **“Transfer fees to escrow”** (secondary: “Open Doppler” only as fallback). Short warning: transfer is **forward-only**; [claim accrued fees first](https://docs.bankr.bot/token-launching/transferring-fees) if the user cares about fees pending at the old beneficiary.
+2. **Bankr-managed beneficiary wallet:** call **`POST https://api.bankr.bot/user/doppler/execute-transfer-beneficiary`** with the user’s **Privy JWT**, `newBeneficiary` = **canonical escrow** from your deploy, and the correct **`tokenAddress`** (and any other required fields per current API docs). Gas is sponsored (within Bankr limits).
+3. **External beneficiary wallet:** call **`POST https://api.bankr.bot/public/doppler/build-transfer-beneficiary`** with `tokenAddress`, `currentBeneficiary`, `newBeneficiary` = escrow → pass returned `to` / `data` / `chainId` into **`confirmTransaction`** (or user’s wallet). User pays gas.
+4. **Resolve metadata** as needed: e.g. `GET /public/doppler/token-fees/:tokenAddress` for pool / initializer per [Bankr docs](https://docs.bankr.bot/token-launching/transferring-fees).
+5. **Gate the wizard:** only advance after **successful** beneficiary transfer (API success or mined tx), then **`finalizeDeposit`** when on-chain reads show escrow shares.
+
+Reference: [Transferring fees to a new wallet](https://docs.bankr.bot/token-launching/transferring-fees).
+
 ---
 
 ## 6. What is *not* acceptable to ship broken
