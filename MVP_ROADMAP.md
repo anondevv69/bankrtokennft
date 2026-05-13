@@ -55,6 +55,7 @@ No auctions, royalties, protocol token, buybacks, or Bankr-specific hooks inside
 | `VERIFICATION.md` | BaseScan verify commands (Sepolia history + **mainnet** templates) |
 | `LAUNCH_CHECKLIST.md` | **Production go-live:** deploy → verify → Railway → E2E before public post |
 | `BANKR_APP.md` | **Bankr App** (Apps SDK): manifest permissions, logs, `tx.prepare` vs standalone `bankr-app/` |
+| `skills/bankr-fee-rights/SKILL.md` | **Bankr agent skill** (install from GitHub): BFRR flows, selectors, structured prompts |
 
 ## Next (not blocking the primitive)
 

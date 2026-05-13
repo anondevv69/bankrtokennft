@@ -19,6 +19,16 @@ Prefer **Bankr’s beneficiary transfer APIs** instead of “open Doppler and pa
 
 Official API overview: [Transferring fees to a new wallet](https://docs.bankr.bot/token-launching/transferring-fees).
 
+## Ask Bankr (agent skill)
+
+For chat/support, install the public skill from this repo (see [Install a Skill from GitHub](https://docs.bankr.bot/skills/in-bankr/from-github/)):
+
+```text
+install the skill at https://github.com/anondevv69/bankrtokennft/tree/main/fee-rights-exchange/skills/bankr-fee-rights
+```
+
+Source: **`skills/bankr-fee-rights/SKILL.md`**. The mini-app still owns **orchestrated** sell flows; the skill guides **structured** agent prompts and troubleshooting.
+
 ## Standalone web
 
 For browser-wallet-only demos and Railway: **`bankr-app/README.md`**.
