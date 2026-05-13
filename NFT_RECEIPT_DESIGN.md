@@ -1,5 +1,7 @@
 # NFT Receipt Layer Design
 
+Implemented reference: `BankrEscrowV3` + `BankrFeeRightsReceipt` in `src/` (see README “NFT Receipt Design”).
+
 This document starts the next protocol phase after Escrow V2 accounting validation. It is intentionally a design checkpoint, not marketplace implementation.
 
 ## Goal

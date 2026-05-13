@@ -126,7 +126,29 @@ token1 = 0x543f82143bAfd178C335Ce06745A3fE9e61Bcbc3
 
 ### NFT Receipt Design
 
-See `NFT_RECEIPT_DESIGN.md` for the next-phase receipt NFT architecture. This phase starts from the validated Escrow V2 accounting primitive and still excludes marketplace/order-book logic.
+See `NFT_RECEIPT_DESIGN.md` for architecture notes. Implemented contracts:
+
+- `src/BankrFeeRightsReceipt.sol` — ERC721 `BFRR`, mint/burn only by escrow.
+- `src/BankrEscrowV3.sol` — same fee flow as V2; `finalizeDeposit` mints the receipt; `redeemRights(tokenId)` gives Bankr rights to the NFT holder; seller `cancelRights` only while they still hold the NFT; `releaseRights` remains admin-only for emergencies.
+
+Deploy V3 (prints escrow + receipt addresses):
+
+```shell
+$ source .env
+$ INITIAL_FEE_MANAGERS=0x1718405E58c61425cDc0083262bC9f72198F5232 \
+  ~/.foundry/bin/forge script script/DeployBankrEscrowV3.s.sol \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
+```
+
+Typical flow:
+
+```text
+prepareDeposit → updateBeneficiary → finalizeDeposit (mints receipt) → optional transfer of receipt → redeemRights(tokenId) or cancelRights(poolId) while holding receipt → withdrawClaimedFees
+```
+
+Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor` on escrow.
 
 ### Doppler SDK Test Launch
 
