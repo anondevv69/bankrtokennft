@@ -23,7 +23,7 @@ https://book.getfoundry.sh/
 
 **Sale primitive scope:** fixed listings (`list` / `buy` / `cancel`) plus **unsolicited ETH offers** (`placeOffer` / `withdrawOffer` / `acceptOffer`) on any receipt id; on-chain reads `totalOfferWei` / `offerWei` and `OfferPlaced` events. Fixed price; ETH only; no auctions, royalties, protocol token, or buybacks in this contract.
 
-Authoritative scope and contributor notes: `MVP_ROADMAP.md`.
+Authoritative scope and contributor notes: `MVP_ROADMAP.md`. **Production go-live:** `LAUNCH_CHECKLIST.md` (deploy → verify → Railway → mandatory E2E before public post).
 
 ### Bankr web app (`bankr-app/`)
 

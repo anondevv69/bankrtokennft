@@ -6,8 +6,9 @@ import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 
 /// @title DeployBankrEscrowV3
 /// @notice Deploys Escrow V3 (balance-delta accounting + ERC721 receipt). The receipt contract is created by the escrow constructor.
-/// @dev forge script script/DeployBankrEscrowV3.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL
-///      forge script script/DeployBankrEscrowV3.s.sol --rpc-url $BASE_SEPOLIA_RPC_URL --private-key $PRIVATE_KEY --broadcast
+/// @dev Production: Base mainnet. Example:
+///      forge script script/DeployBankrEscrowV3.s.sol --rpc-url $BASE_MAINNET_RPC_URL --private-key $PRIVATE_KEY --broadcast
+///      Lab: same script with Base Sepolia RPC for throwaway testing.
 contract DeployBankrEscrowV3 is Script {
     function run() external returns (BankrEscrowV3 escrow) {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");

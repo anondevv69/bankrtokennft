@@ -48,10 +48,12 @@ No auctions, royalties, protocol token, buybacks, or Bankr-specific hooks inside
 | --- | --- |
 | `BankrEscrowV3` + `BankrFeeRightsReceipt` | Escrow + receipt (see `README.md`, `NFT_RECEIPT_DESIGN.md`) |
 | `FeeRightsFixedSale` | Fixed-price listings + ETH offer book (generic `IERC721`) |
+| `script/DeployBankrEscrowV3.s.sol` | Escrow V3 + receipt (one broadcast; log both addresses) |
 | `script/DeployFeeRightsFixedSale.s.sol` | Deploy script (use Base mainnet RPC for production; Sepolia ok for lab) |
 | `test/FeeRightsFixedSale.t.sol` | Listing / buy / cancel paths |
 | `test/FeeRightsOffers.t.sol` | Offer / accept / withdraw paths |
-| `VERIFICATION.md` | Verify sale contract after broadcast |
+| `VERIFICATION.md` | BaseScan verify commands (Sepolia history + **mainnet** templates) |
+| `LAUNCH_CHECKLIST.md` | **Production go-live:** deploy → verify → Railway → E2E before public post |
 
 ## Next (not blocking the primitive)
 

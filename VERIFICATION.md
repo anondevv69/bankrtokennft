@@ -1,5 +1,7 @@
 # Base Sepolia Verification
 
+> **Going to production on Base mainnet?** Follow **`LAUNCH_CHECKLIST.md`** first, then fill in the **Base mainnet (production)** section at the end of this file with real addresses and `forge verify-contract` commands (`--chain 8453`, [basescan.org](https://basescan.org)).
+
 ## Deployment
 
 `BankrEscrowTest` was deployed to Base Sepolia:
@@ -173,3 +175,76 @@ source .env
 ```
 
 If `cast code` returns `0x`, the contract is not visible at that address on the configured RPC/chain.
+
+---
+
+## Base mainnet (production)
+
+Fill these in **after** you broadcast on Base (`chain id 8453`). Explorer: [basescan.org](https://basescan.org). Use a paid RPC for `cast`/verification if the public endpoint is flaky.
+
+### Deployed addresses (replace placeholders)
+
+| Contract | Address | Deploy tx |
+| --- | --- | --- |
+| `BankrEscrowV3` | `0x…` | `0x…` |
+| `BankrFeeRightsReceipt` | `0x…` (from `escrow.receipt()` or deploy logs) | *(same deploy as escrow if created in constructor)* |
+| `FeeRightsFixedSale` | `0x…` | `0x…` |
+
+### Verify `BankrEscrowV3` (constructor: `address initialOwner`)
+
+```bash
+source .env
+ESCROW=0xYourEscrowV3
+OWNER=0xYourInitialOwner
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$OWNER")
+
+~/.foundry/bin/forge verify-contract \
+  "$ESCROW" \
+  src/BankrEscrowV3.sol:BankrEscrowV3 \
+  --chain 8453 \
+  --verifier etherscan \
+  --etherscan-api-key "$ETHERSCAN_API_KEY" \
+  --constructor-args "$CONSTRUCTOR_ARGS" \
+  --watch
+```
+
+### Verify `BankrFeeRightsReceipt` (constructor: `address escrow_`)
+
+```bash
+source .env
+RECEIPT=0xYourReceipt
+ESCROW=0xYourEscrowV3
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$ESCROW")
+
+~/.foundry/bin/forge verify-contract \
+  "$RECEIPT" \
+  src/BankrFeeRightsReceipt.sol:BankrFeeRightsReceipt \
+  --chain 8453 \
+  --verifier etherscan \
+  --etherscan-api-key "$ETHERSCAN_API_KEY" \
+  --constructor-args "$CONSTRUCTOR_ARGS" \
+  --watch
+```
+
+### Verify `FeeRightsFixedSale` (no constructor args)
+
+```bash
+source .env
+SALE=0xYourFeeRightsFixedSale
+
+~/.foundry/bin/forge verify-contract \
+  "$SALE" \
+  src/FeeRightsFixedSale.sol:FeeRightsFixedSale \
+  --chain 8453 \
+  --verifier etherscan \
+  --etherscan-api-key "$ETHERSCAN_API_KEY" \
+  --watch
+```
+
+### Preflight (`cast code` on Base)
+
+```bash
+source .env
+~/.foundry/bin/cast code 0xYourAddress --rpc-url "$BASE_MAINNET_RPC_URL"
+```
+
