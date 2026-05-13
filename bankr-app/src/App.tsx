@@ -109,15 +109,15 @@ export default function App() {
   return (
     <>
       <div className="mvp-banner" role="status">
-        <div className="mvp-banner__line1">Testnet MVP — Base Sepolia only</div>
-        <div className="mvp-banner__line2">Experimental · not audited · no mainnet</div>
+        <div className="mvp-banner__line1">Bankr MVP — Base mainnet only</div>
+        <div className="mvp-banner__line2">Real assets · experimental UI · use at your own risk</div>
       </div>
 
       <h1>Bankr sale</h1>
       <p className="sub">
         Simple flow: <strong>sell</strong> at a fixed price (or <strong>cancel</strong> the sale), or let people{" "}
-        <strong>offer</strong> ETH — you can <strong>accept</strong> an offer or ignore it. No auctions, buybacks, or
-        routing. Wallet-only signing — never paste private keys here or in Railway.
+        <strong>offer</strong> ETH — you can <strong>accept</strong> an offer or ignore it. On <strong>Base</strong> with
+        real Bankr receipt tokens. Wallet-only signing — never paste private keys here or in Railway.
       </p>
 
       <div className="panel">
@@ -129,7 +129,7 @@ export default function App() {
             disabled={connectPending}
             onClick={() => connect({ connector: injected(), chainId: MVP_CHAIN_ID })}
           >
-            {connectPending ? "Connecting…" : "Connect wallet (Base Sepolia)"}
+            {connectPending ? "Connecting…" : "Connect wallet (Base)"}
           </button>
         ) : (
           <div className="row">
@@ -146,8 +146,8 @@ export default function App() {
         <div className="panel chain-gate">
           <h2>Wrong network</h2>
           <p className="err" style={{ marginTop: 0 }}>
-            This app only works on <strong>Base Sepolia</strong> (chain id {MVP_CHAIN_ID}). Switch in your wallet to
-            continue — transactions are blocked here to avoid mistakes on mainnet or other chains.
+            This app only works on <strong>Base</strong> mainnet (chain id {MVP_CHAIN_ID}). Switch in your wallet to
+            continue — transactions are blocked here on other networks.
           </p>
           <button
             type="button"
@@ -155,7 +155,7 @@ export default function App() {
             disabled={switchPending}
             onClick={() => switchChain?.({ chainId: MVP_CHAIN_ID })}
           >
-            {switchPending ? "Switching…" : "Switch to Base Sepolia"}
+            {switchPending ? "Switching…" : "Switch to Base"}
           </button>
         </div>
       )}

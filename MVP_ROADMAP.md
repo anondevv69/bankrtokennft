@@ -48,14 +48,14 @@ No auctions, royalties, protocol token, buybacks, or Bankr-specific hooks inside
 | --- | --- |
 | `BankrEscrowV3` + `BankrFeeRightsReceipt` | Escrow + receipt (see `README.md`, `NFT_RECEIPT_DESIGN.md`) |
 | `FeeRightsFixedSale` | Fixed-price listings + ETH offer book (generic `IERC721`) |
-| `script/DeployFeeRightsFixedSale.s.sol` | Base Sepolia deploy |
+| `script/DeployFeeRightsFixedSale.s.sol` | Deploy script (use Base mainnet RPC for production; Sepolia ok for lab) |
 | `test/FeeRightsFixedSale.t.sol` | Listing / buy / cancel paths |
 | `test/FeeRightsOffers.t.sol` | Offer / accept / withdraw paths |
 | `VERIFICATION.md` | Verify sale contract after broadcast |
 
 ## Next (not blocking the primitive)
 
-- Bankr mini app (list / buy UX, links into escrow).
+- Bankr mini app polish (`bankr-app/` is wired for **Base mainnet**; extend UX / escrow links as needed).
 - Receipt metadata polish for secondary venues.
 
 ## For contributors
