@@ -1,8 +1,8 @@
 ---
 name: bankr-fee-rights
-description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list at a price in ETH (wei), buy active listings, cancel. Use when the user sells or buys fee rights, lists BFRR for X ETH, buys a listing, listingId, FeeRightsFixedSale, BankrEscrowV3, prepareDeposit, finalizeDeposit, or Doppler fee recipient.
+description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 3
+version: 4
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -13,7 +13,9 @@ metadata:
 
 Guidance for agents helping users with **Bankr fee rights** custody, **BFRR** receipts, and **FeeRightsFixedSale** listings on **Base (chain id 8453)**.
 
-**Primary UX:** the **Bankr Marketplace mini-app** should orchestrate txs (queued steps + receipts + one summary confirm). This skill supports **chat**, **support**, and **manual** Bankr wallet prompts — **do not** treat pasted raw JSON as the only execution path; prefer **structured** “send transaction … calling …” instructions (see [QR Coin skill pattern](https://github.com/BankrBot/skills/blob/main/qrcoin/SKILL.md)).
+**Primary UX:** the **Bankr Marketplace mini-app** should orchestrate txs (queued steps + receipts + one summary confirm). This skill supports **DMs / Ask Bankr / support** so users can still succeed with **structured facts** when the app is wrong or unavailable — **do not** treat pasted raw JSON as the only execution path; prefer **structured** “send transaction … calling …” instructions (see [QR Coin skill pattern](https://github.com/BankrBot/skills/blob/main/qrcoin/SKILL.md)).
+
+**DM templates** (what to ask the user for in one message): see **`references/dm-intents.md`**.
 
 For repo contracts, ABIs, and launch QA: **`LAUNCH_CHECKLIST.md`**, **`BANKR_APP.md`**, **`README.md`** in [fee-rights-exchange](https://github.com/anondevv69/bankrtokennft).
 
@@ -33,14 +35,45 @@ Other addresses (**fee manager**, **poolId**, **token0/token1**) are **per launc
 
 ---
 
-## On-chain flow (order matters)
+## On-chain flow (order matters — do not invert)
 
-1. **`prepareDeposit(feeManager, poolId, token0, token1)`** on **Escrow** — records **pending** seller = `msg.sender`. Caller must have **`getShares(poolId, msg.sender) > 0`** on the fee manager (holds rights *before* beneficiary moves to escrow).
-2. **Fee beneficiary → escrow** — so shares move to escrow. Prefer Bankr **`execute-transfer-beneficiary`** / **`build-transfer-beneficiary`** ([Transferring fees](https://docs.bankr.bot/token-launching/transferring-fees)); Doppler/Clanker UI as fallback.
-3. **`finalizeDeposit(poolId)`** on **Escrow** — seller only; escrow must hold shares; mints **BFRR**.
-4. **List / buy** — **`FeeRightsFixedSale`**: approve marketplace for BFRR, then **`list(collection, tokenId, priceWei)`**; buyers use **`buy(listingId)`** with exact `msg.value`.
+**Hard rule:** **`prepareDeposit` comes before moving the fee beneficiary to the escrow address.**  
+`prepareDeposit` checks **`getShares(poolId, msg.sender) > 0`** on the **fee manager** while the **seller still holds** the on-chain position. If beneficiary is already pointed at escrow first, the seller may show **`getShares = 0`** and **`prepareDeposit` fails** — that is a **ordering bug**, not “register first.”
+
+1. **`prepareDeposit(feeManager, poolId, token0, token1)`** on **Escrow** — pending seller = `msg.sender`; **`getShares(poolId, msg.sender) > 0`** on **`feeManager`**.
+2. **Fee beneficiary → escrow** — `newBeneficiary` = escrow. Bankr APIs need a valid **`tokenAddress`** (the **launched token**, e.g. t4), or **`build-transfer-beneficiary`** returns `Valid tokenAddress required`. See [Transferring fees](https://docs.bankr.bot/token-launching/transferring-fees).
+3. **`finalizeDeposit(poolId)`** — seller only; escrow must hold shares; mints **BFRR**.
+4. **List / buy** — **`FeeRightsFixedSale`** (different contract from escrow): approve + **`list`**; **`buy(listingId)`** with exact **`msg.value`**.
 
 Never tell the user **“success”** until the matching tx **mined** and reads match (e.g. `pendingSeller`, shares on escrow).
+
+---
+
+## Fee manager resolution (most common production bug)
+
+- The **`feeManager`** argument to **`prepareDeposit`** must be the **same on-chain contract** where **`getShares(bytes32 poolId, address beneficiary)`** is defined for that pool — typically the same target **`build-transfer-beneficiary`** uses for that **launched token**.
+- **`getShares` that reverts** on `eth_call` usually means **wrong `feeManager` address or invalid pool for that contract** — **not** the same as “shares are zero.” **`0`** returned (no revert) means no position for that wallet on **that** manager.
+- **`GET /public/doppler/token-fees/:tokenAddress`** returns **`poolId`** and beneficiary **`address`** / **`share`** in some responses — it may **not** include the **initializer / fee manager**; resolve that from the **same internal registry** the product uses for beneficiary transfers, not guesses.
+
+---
+
+## Escrow allowlist (owner, once per manager contract)
+
+- **`setFeeManagerAllowed(feeManager, bool)`** on escrow — **`onlyOwner`**. Not `allowFeeManager`.
+- **Per fee manager contract address**, not per user wallet. New sellers reuse the same allowlisted manager.
+- Deploy-time: set **`INITIAL_FEE_MANAGERS`** CSV in **`DeployBankrEscrowV3`** so allowlist is included in the deploy broadcast.
+
+---
+
+## Common agent mistakes (do not repeat)
+
+| Wrong advice | Why it’s wrong |
+|--------------|----------------|
+| Approve **WETH** to **`0xFb28…`** for **`prepareDeposit`** | **`prepareDeposit`** is **`value: 0`**; it does not spend user WETH. |
+| Call **`0xFb28…` the “marketplace”** | **Listings** are **`FeeRightsFixedSale`** (`0xA816…`). **`0xFb28…`** is **escrow** (`BankrEscrowV3`). |
+| “Move beneficiary to escrow **before** prepare so shares exist” | **Inverted order** — see section above. |
+| “`getShares` reverted ⇒ user has no position” | **Revert ⇒ wrong target / ABI**, until proven otherwise. Off-chain **token-fees** may still show **share %** for the user. |
+| **`balanceOf`** on fee manager for shares | Use **`getShares(poolId, address)`** per **`IBankrFees`**. |
 
 ---
 
@@ -50,16 +83,16 @@ Never tell the user **“success”** until the matching tx **mined** and reads 
 - **Selector:** `0x6ac71ccc` (**four** arguments only — not a five-argument overload.)
 - **Chain:** Base mainnet (`8453`).
 
-### Example (t4-style pool — illustrative)
+### Example (t4-style pool — **verify `feeManager` before use**)
 
-Fee manager `0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12`, poolId `0xc4db87d196ba3cdc05950eeec2d35de8cf76fb81cde996a5613682e99808cc8f`, token0 WETH `0x4200000000000000000000000000000000000006`, token1 `0xfc8ff3050def72b18083b119ce0cecab86b43ba3`.
+Illustrative only — **`feeManager` must match on-chain reality** for that token (see **Fee manager resolution**). Example tuple: poolId `0xc4db87d196ba3cdc05950eeec2d35de8cf76fb81cde996a5613682e99808cc8f`, token0 WETH `0x4200000000000000000000000000000000000006`, token1 `0xfc8ff3050def72b18083b119ce0cecab86b43ba3`.
 
-Structured prompt for Bankr (adjust addresses after resolution):
+Structured prompt for Bankr (substitute **verified** `feeManager`):
 
 ```text
 Send transaction to 0xFb28D9C636514f8a9D129873750F9b886707d95F on Base calling
 prepareDeposit(
-  0x660eaaedebc968f8f3694354fa8ec0b4c5ba8d12,
+  <VERIFIED_FEE_MANAGER>,
   0xc4db87d196ba3cdc05950eeec2d35de8cf76fb81cde996a5613682e99808cc8f,
   0x4200000000000000000000000000000000000006,
   0xfc8ff3050def72b18083b119ce0cecab86b43ba3
@@ -176,10 +209,11 @@ calling buy(<listingId>)
 
 ## Agent rules of thumb
 
-1. **Resolve** `feeManager`, `poolId`, `token0`, `token1` from app metadata or Bankr/Doppler public reads — **never guess** hex.
+1. **Resolve** `feeManager`, `poolId`, `token0`, `token1` from the **same pipeline** as production beneficiary tooling — **never hardcode** a fee manager unless **`getShares`** returns cleanly for that wallet + pool.
 2. **Never** instruct users to rely on **pasting** transaction JSON as the only broadcast path; align with **mini-app `confirmTransaction`** and show **tx hash** + BaseScan after submit.
-3. **Gate** steps on **receipts** + contract reads (`pendingSeller`, escrow `getShares`, beneficiary reads consistent with finalize checks).
-4. For **orchestration**: tell builders to treat **“sell rights + list at X ETH”** as one **job** in the app (queued txs + receipts + one summary confirm listing all side effects); chat skill is **supplemental**.
+3. **Gate** steps on **receipts** + contract reads (`pendingSeller`, shares on escrow for finalize).
+4. **DMs:** ask for the **structured block** in **`references/dm-intents.md`** so one thread can drive **sell** or **buy** without back-and-forth guessing.
+5. For **orchestration**: builders should treat **“sell rights + list at X ETH”** as one **job** (queued txs + receipts + one summary confirm); this skill stays **supplemental** for humans and agents.
 
 ---
 
