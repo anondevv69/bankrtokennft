@@ -1,6 +1,12 @@
-# Bankr app (web)
+Minimal Base Sepolia UI for `FeeRightsFixedSale`: **sell at a price or cancel**, **offers** (send, pull back, accept), **buy** a listing. Hardcoded to **Base Sepolia (84532)** only — wrong network shows a gate and blocks reads/writes from this UI.
 
-Minimal Base Sepolia UI for `FeeRightsFixedSale`: connect wallet, read aggregate and personal offers, place or withdraw offers, approve collection, list / cancel / buy, and accept a bid.
+## Node version
+
+Use **Node 20 LTS** (see `package.json` `engines` and `nixpacks.toml`). Railway picks this up via `NIXPACKS_NODE_VERSION`.
+
+## Security (Railway and everywhere)
+
+Do **not** set `PRIVATE_KEY`, deployer secrets, or escrow owner keys in Railway or any `VITE_*` / frontend env. This app is **wallet-only**: users sign in the browser. Anything that can move funds belongs in a secure backend or Foundry on your machine — not here.
 
 ## Local dev vs public hosting
 
@@ -8,6 +14,14 @@ Minimal Base Sepolia UI for `FeeRightsFixedSale`: connect wallet, read aggregate
 - **`npm run build`** — Produces static files in **`dist/`** (HTML/JS/CSS). To give other people a URL, deploy **`dist`** (or let a platform build it for you).
 
 You do **not** need Railway (or any host) to develop locally. You **do** need a host if you want a stable public link (e.g. for Bankr teammates or a staging demo).
+
+## Production build check
+
+```bash
+npm run verify
+```
+
+Runs `npm run build` and confirms `dist/index.html` exists (use in CI or before shipping).
 
 ## Setup
 
@@ -28,6 +42,8 @@ Opens on port **5174** by default.
 
 `VITE_*` variables are baked in at **`npm run build`** time. On Railway (or any CI), define `VITE_MARKETPLACE_ADDRESS` (and optional `VITE_DEFAULT_RECEIPT_COLLECTION`, `VITE_RPC_URL`) in the service **before** the build step runs, then trigger a rebuild when you change them.
 
+`VITE_CHAIN_ID` is **documented for operators only** — this MVP build is hardcoded to Base Sepolia `84532` in `src/chain.ts` and `src/wagmi.ts`. If you set another value, it is ignored and a console warning is printed.
+
 ## Build
 
 ```bash
@@ -35,19 +51,18 @@ npm run build
 npm run preview
 ```
 
-## Deploy on Railway (optional)
+## Deploy on Railway
 
 1. New **Railway** project → **Deploy from GitHub** → pick this repo.
 2. Set **Root Directory** to `bankr-app` (monorepo subfolder).
-3. In **Variables**, add at least:
+3. **Nixpacks:** this folder includes `nixpacks.toml` (Node 20, `npm ci`, `npm run build`, `npm start`). If Railway does not pick it up, set **Custom Build Command** to `npm run build` and **Start Command** to `npm start`.
+4. In **Variables**, add at least:
    - `VITE_MARKETPLACE_ADDRESS` = your deployed `FeeRightsFixedSale` on Base Sepolia  
    - Optionally `VITE_DEFAULT_RECEIPT_COLLECTION` = `BankrFeeRightsReceipt` address  
-   - Optionally `VITE_RPC_URL` = `https://sepolia.base.org` (or your RPC)
-4. Railway will run `npm install` and needs a **build** + **start**:
-   - **Build command:** `npm run build`
-   - **Start command:** `npm start` (serves `dist/` on `PORT`)
+   - Optionally `VITE_RPC_URL` = `https://sepolia.base.org` (or your RPC)  
+   - Optionally `VITE_CHAIN_ID=84532` (documentation parity only)
 
-After deploy, open the generated public URL. Wallets must still use **Base Sepolia** (chain 84532).
+After deploy, open the public URL. The UI shows a **testnet banner** and refuses other chains when a wallet is connected.
 
 ## Next steps to “wire up” the Bankr app
 

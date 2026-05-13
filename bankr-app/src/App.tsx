@@ -7,11 +7,12 @@ import {
   useReadContract,
   useWriteContract,
   useChainId,
+  useSwitchChain,
 } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
 import { isAddress, parseEther, formatEther, type Address } from "viem";
 import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
+import { MVP_CHAIN_ID } from "./chain";
 
 const erc721Abi = [
   {
@@ -38,6 +39,7 @@ export default function App() {
   const chainId = useChainId();
   const { connect, isPending: connectPending } = useConnect();
   const { disconnect } = useDisconnect();
+  const { switchChain, isPending: switchPending } = useSwitchChain();
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
 
   const [mpInput, setMpInput] = useState(envAddr("VITE_MARKETPLACE_ADDRESS"));
@@ -69,13 +71,15 @@ export default function App() {
 
   const readsEnabled = Boolean(marketplace && collection && tokenId !== null);
 
+  const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
+
   const { data: totalOffersWei } = useReadContract({
     address: readsEnabled ? marketplace : undefined,
     abi: feeRightsFixedSaleAbi,
     functionName: "totalOfferWei",
     args: readsEnabled && tokenId !== null ? [collection!, tokenId] : undefined,
-    chainId: baseSepolia.id,
-    query: { enabled: readsEnabled },
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: readsEnabled && !wrongNetwork },
   });
 
   const { data: myOfferWei } = useReadContract({
@@ -83,8 +87,8 @@ export default function App() {
     abi: feeRightsFixedSaleAbi,
     functionName: "offerWei",
     args: readsEnabled && tokenId !== null && address ? [collection!, tokenId, address] : undefined,
-    chainId: baseSepolia.id,
-    query: { enabled: readsEnabled && Boolean(address) },
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: readsEnabled && Boolean(address) && !wrongNetwork },
   });
 
   const invalidate = () => {
@@ -100,33 +104,37 @@ export default function App() {
     }
   };
 
-  const wrongChain = isConnected && chainId !== baseSepolia.id;
+  const txDisabled = !isConnected || writePending || wrongNetwork;
 
   return (
     <>
-      <h1>Bankr fee-rights</h1>
+      <div className="mvp-banner" role="status">
+        <div className="mvp-banner__line1">Testnet MVP — Base Sepolia only</div>
+        <div className="mvp-banner__line2">Experimental · not audited · no mainnet</div>
+      </div>
+
+      <h1>Bankr sale</h1>
       <p className="sub">
-        Base Sepolia — receipt offers and fixed listings against <span className="mono">FeeRightsFixedSale</span>.
-        Configure addresses below (or set <span className="mono">VITE_*</span> in <span className="mono">.env</span>).
+        Simple flow: <strong>sell</strong> at a fixed price (or <strong>cancel</strong> the sale), or let people{" "}
+        <strong>offer</strong> ETH — you can <strong>accept</strong> an offer or ignore it. No auctions, buybacks, or
+        routing. Wallet-only signing — never paste private keys here or in Railway.
       </p>
 
       <div className="panel">
         <h2>Wallet</h2>
-        {wrongChain && (
-          <p className="err">Switch your wallet to Base Sepolia (chain 84532).</p>
-        )}
         {!isConnected ? (
           <button
             type="button"
             className="primary"
             disabled={connectPending}
-            onClick={() => connect({ connector: injected() })}
+            onClick={() => connect({ connector: injected(), chainId: MVP_CHAIN_ID })}
           >
-            {connectPending ? "Connecting…" : "Connect wallet"}
+            {connectPending ? "Connecting…" : "Connect wallet (Base Sepolia)"}
           </button>
         ) : (
           <div className="row">
             <span className="mono muted">{address}</span>
+            <span className="muted">· chain {chainId}</span>
             <button type="button" onClick={() => disconnect()}>
               Disconnect
             </button>
@@ -134,225 +142,252 @@ export default function App() {
         )}
       </div>
 
-      <div className="panel">
-        <h2>Contracts</h2>
-        <label htmlFor="mp">Marketplace (FeeRightsFixedSale)</label>
-        <input
-          id="mp"
-          placeholder="0x…"
-          value={mpInput}
-          onChange={(e) => setMpInput(e.target.value)}
-        />
-        <label htmlFor="col">Receipt collection (ERC721)</label>
-        <input
-          id="col"
-          placeholder="BankrFeeRightsReceipt address"
-          value={colInput}
-          onChange={(e) => setColInput(e.target.value)}
-        />
-        <label htmlFor="tid">Token ID</label>
-        <input id="tid" placeholder="e.g. 12345" value={tokenIdStr} onChange={(e) => setTokenIdStr(e.target.value)} />
-        {readsEnabled && tokenId !== null && (
-          <div className="readout">
-            <div>
-              <span className="muted">Total offer ETH on this NFT — </span>
-              <strong>{formatEther((totalOffersWei as bigint | undefined) ?? 0n)}</strong>
-            </div>
-            {address && (
-              <div style={{ marginTop: "0.5rem" }}>
-                <span className="muted">Your locked offer — </span>
-                <strong>{formatEther((myOfferWei as bigint | undefined) ?? 0n)}</strong>
+      {wrongNetwork && (
+        <div className="panel chain-gate">
+          <h2>Wrong network</h2>
+          <p className="err" style={{ marginTop: 0 }}>
+            This app only works on <strong>Base Sepolia</strong> (chain id {MVP_CHAIN_ID}). Switch in your wallet to
+            continue — transactions are blocked here to avoid mistakes on mainnet or other chains.
+          </p>
+          <button
+            type="button"
+            className="primary"
+            disabled={switchPending}
+            onClick={() => switchChain?.({ chainId: MVP_CHAIN_ID })}
+          >
+            {switchPending ? "Switching…" : "Switch to Base Sepolia"}
+          </button>
+        </div>
+      )}
+
+      {!wrongNetwork && (
+        <>
+          <div className="panel">
+            <h2>Which token</h2>
+            <label htmlFor="mp">Marketplace contract</label>
+            <input
+              id="mp"
+              placeholder="FeeRightsFixedSale 0x…"
+              value={mpInput}
+              onChange={(e) => setMpInput(e.target.value)}
+            />
+            <label htmlFor="col">Receipt NFT contract</label>
+            <input
+              id="col"
+              placeholder="BankrFeeRightsReceipt 0x…"
+              value={colInput}
+              onChange={(e) => setColInput(e.target.value)}
+            />
+            <label htmlFor="tid">Token ID</label>
+            <input
+              id="tid"
+              placeholder="e.g. 12345"
+              value={tokenIdStr}
+              onChange={(e) => setTokenIdStr(e.target.value)}
+            />
+            {readsEnabled && tokenId !== null && (
+              <div className="readout">
+                <div>
+                  <span className="muted">Total ETH offered on this token — </span>
+                  <strong>{formatEther((totalOffersWei as bigint | undefined) ?? 0n)}</strong>
+                </div>
+                {address && (
+                  <div style={{ marginTop: "0.5rem" }}>
+                    <span className="muted">Your offer (locked) — </span>
+                    <strong>{formatEther((myOfferWei as bigint | undefined) ?? 0n)}</strong>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      <div className="panel">
-        <h2>Offers (no listing required)</h2>
-        <label htmlFor="oe">ETH to add to your offer</label>
-        <input id="oe" value={offerEth} onChange={(e) => setOfferEth(e.target.value)} />
-        <button
-          type="button"
-          className="primary"
-          disabled={!isConnected || !readsEnabled || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!address || !readsEnabled || tokenId === null || !marketplace || !collection) return;
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "placeOffer",
-                args: [collection, tokenId],
-                value: parseEther(offerEth),
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Place / top up offer
-        </button>
-        <button
-          type="button"
-          style={{ marginLeft: "0.5rem" }}
-          disabled={!isConnected || !readsEnabled || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "withdrawOffer",
-                args: [collection, tokenId],
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Withdraw my offer
-        </button>
-      </div>
-
-      <div className="panel">
-        <h2>Seller — accept a bid</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          You must approve the marketplace on the receipt NFT first (button below), then accept. ETH goes to the
-          current owner of the token.
-        </p>
-        <label htmlFor="bidder">Bidder address to accept</label>
-        <input
-          id="bidder"
-          placeholder="0x…"
-          value={acceptBidder}
-          onChange={(e) => setAcceptBidder(e.target.value)}
-        />
-        <button
-          type="button"
-          className="primary"
-          disabled={
-            !isConnected || !readsEnabled || !isAddress(acceptBidder) || writePending || wrongChain
-          }
-          onClick={() =>
-            run(async () => {
-              if (!readsEnabled || tokenId === null || !marketplace || !collection || !isAddress(acceptBidder)) {
-                return;
+          <div className="panel">
+            <h2>Sell at a price — or cancel</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              List = you want to sell at this ETH price. Cancel = you changed your mind and get the NFT back from the
+              marketplace contract.
+            </p>
+            <button
+              type="button"
+              disabled={txDisabled || !readsEnabled}
+              onClick={() =>
+                run(async () => {
+                  if (!readsEnabled || !collection || !marketplace) return;
+                  await writeContractAsync({
+                    address: collection,
+                    abi: erc721Abi,
+                    functionName: "setApprovalForAll",
+                    args: [marketplace, true],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
               }
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "acceptOffer",
-                args: [collection, tokenId, acceptBidder as Address],
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Accept offer
-        </button>
-      </div>
+            >
+              Step 1 — Approve marketplace on your receipt
+            </button>
+            <label htmlFor="lp" style={{ marginTop: "1rem" }}>
+              Your sale price (ETH)
+            </label>
+            <input id="lp" value={listPriceEth} onChange={(e) => setListPriceEth(e.target.value)} />
+            <button
+              type="button"
+              className="primary"
+              disabled={txDisabled || !readsEnabled}
+              onClick={() =>
+                run(async () => {
+                  if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "list",
+                    args: [collection, tokenId, parseEther(listPriceEth)],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              List for sale
+            </button>
+            <label htmlFor="lid" style={{ marginTop: "1rem" }}>
+              Listing ID (to cancel)
+            </label>
+            <input id="lid" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
+            <button
+              type="button"
+              className="danger"
+              disabled={txDisabled || !marketplaceOk}
+              onClick={() =>
+                run(async () => {
+                  if (!marketplace) return;
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "cancel",
+                    args: [BigInt(listingIdStr || "0")],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Cancel sale — I do not want to sell
+            </button>
+          </div>
 
-      <div className="panel">
-        <h2>NFT approval (list or accept)</h2>
-        <button
-          type="button"
-          disabled={!isConnected || !readsEnabled || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!readsEnabled || !collection || !marketplace) return;
-              await writeContractAsync({
-                address: collection,
-                abi: erc721Abi,
-                functionName: "setApprovalForAll",
-                args: [marketplace, true],
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Approve marketplace on collection
-        </button>
-      </div>
+          <div className="panel">
+            <h2>Offers — optional</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Anyone can lock ETH as an offer even if you have not listed. You can accept an offer (sell to that
+              bidder) or do nothing. You cannot place new offers while your token is in an active fixed listing (use
+              cancel first if needed).
+            </p>
+            <label htmlFor="oe">Add to my offer (ETH)</label>
+            <input id="oe" value={offerEth} onChange={(e) => setOfferEth(e.target.value)} />
+            <button
+              type="button"
+              className="primary"
+              disabled={txDisabled || !readsEnabled}
+              onClick={() =>
+                run(async () => {
+                  if (!address || !readsEnabled || tokenId === null || !marketplace || !collection) return;
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "placeOffer",
+                    args: [collection, tokenId],
+                    value: parseEther(offerEth),
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Send offer
+            </button>
+            <button
+              type="button"
+              style={{ marginLeft: "0.5rem" }}
+              disabled={txDisabled || !readsEnabled}
+              onClick={() =>
+                run(async () => {
+                  if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "withdrawOffer",
+                    args: [collection, tokenId],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Pull back my offer
+            </button>
+            <label htmlFor="bidder" style={{ marginTop: "1rem" }}>
+              Seller: accept this bidder&apos;s address
+            </label>
+            <input
+              id="bidder"
+              placeholder="0x…"
+              value={acceptBidder}
+              onChange={(e) => setAcceptBidder(e.target.value)}
+            />
+            <button
+              type="button"
+              className="primary"
+              disabled={txDisabled || !readsEnabled || !isAddress(acceptBidder)}
+              onClick={() =>
+                run(async () => {
+                  if (!readsEnabled || tokenId === null || !marketplace || !collection || !isAddress(acceptBidder)) {
+                    return;
+                  }
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "acceptOffer",
+                    args: [collection, tokenId, acceptBidder as Address],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Accept offer — sell to them at their locked price
+            </button>
+          </div>
 
-      <div className="panel">
-        <h2>Fixed listing</h2>
-        <label htmlFor="lp">List price (ETH)</label>
-        <input id="lp" value={listPriceEth} onChange={(e) => setListPriceEth(e.target.value)} />
-        <button
-          type="button"
-          className="primary"
-          disabled={!isConnected || !readsEnabled || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "list",
-                args: [collection, tokenId, parseEther(listPriceEth)],
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          List token
-        </button>
-        <label htmlFor="lid" style={{ marginTop: "1rem" }}>
-          Listing ID — cancel
-        </label>
-        <input id="lid" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
-        <button
-          type="button"
-          disabled={!isConnected || !marketplaceOk || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!marketplace) return;
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "cancel",
-                args: [BigInt(listingIdStr || "0")],
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Cancel listing
-        </button>
-      </div>
-
-      <div className="panel">
-        <h2>Buy listing</h2>
-        <label htmlFor="lid2">Listing ID</label>
-        <input id="lid2" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
-        <label htmlFor="bpe">Exact ETH (must match list price)</label>
-        <input id="bpe" value={buyPriceEth} onChange={(e) => setBuyPriceEth(e.target.value)} />
-        <button
-          type="button"
-          className="primary"
-          disabled={!isConnected || !marketplaceOk || writePending || wrongChain}
-          onClick={() =>
-            run(async () => {
-              if (!marketplace) return;
-              await writeContractAsync({
-                address: marketplace,
-                abi: feeRightsFixedSaleAbi,
-                functionName: "buy",
-                args: [BigInt(listingIdStr || "0")],
-                value: parseEther(buyPriceEth),
-                chainId: baseSepolia.id,
-              });
-            })
-          }
-        >
-          Buy
-        </button>
-      </div>
+          <div className="panel">
+            <h2>Buy someone else&apos;s listing</h2>
+            <label htmlFor="lid2">Listing ID</label>
+            <input id="lid2" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
+            <label htmlFor="bpe">ETH (must match seller&apos;s price exactly)</label>
+            <input id="bpe" value={buyPriceEth} onChange={(e) => setBuyPriceEth(e.target.value)} />
+            <button
+              type="button"
+              className="primary"
+              disabled={txDisabled || !marketplaceOk}
+              onClick={() =>
+                run(async () => {
+                  if (!marketplace) return;
+                  await writeContractAsync({
+                    address: marketplace,
+                    abi: feeRightsFixedSaleAbi,
+                    functionName: "buy",
+                    args: [BigInt(listingIdStr || "0")],
+                    value: parseEther(buyPriceEth),
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Buy
+            </button>
+          </div>
+        </>
+      )}
 
       {writeError && <p className="err">{writeError.message}</p>}
 
       <p className="muted" style={{ marginTop: "2rem" }}>
-        Escrow prepare / finalize / redeem still happen in <span className="mono">BankrEscrowV3</span> — this UI only
-        covers the marketplace contract.
+        Escrow (mint receipt, redeem) is still <span className="mono">BankrEscrowV3</span> in the repo — this page is
+        only the sale / offer marketplace.
       </p>
     </>
   );

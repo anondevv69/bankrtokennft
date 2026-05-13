@@ -7,6 +7,8 @@
   --accent: #3d8bfd;
   --accent-dim: #2563c4;
   --danger: #f87171;
+  --banner-amber: #f59e0b;
+  --banner-amber-dark: #92400e;
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-display: "Instrument Serif", Georgia, serif;
 }
@@ -28,6 +30,34 @@ body {
   max-width: 720px;
   margin: 0 auto;
   padding: 2rem 1.25rem 4rem;
+}
+
+.mvp-banner {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  margin: -2rem -1.25rem 1.25rem;
+  padding: 0.85rem 1rem;
+  text-align: center;
+  background: linear-gradient(105deg, #b45309 0%, var(--banner-amber) 45%, #d97706 100%);
+  color: #0c0a09;
+  border-bottom: 3px solid var(--banner-amber-dark);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.mvp-banner__line1 {
+  font-weight: 800;
+  font-size: clamp(1rem, 3.5vw, 1.2rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mvp-banner__line2 {
+  margin-top: 0.35rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
 }
 
 h1 {
@@ -144,8 +174,11 @@ button.danger {
   margin-top: 0.5rem;
 }
 
-.err {
-  color: var(--danger);
-  font-size: 0.85rem;
-  margin-top: 0.5rem;
+.chain-gate {
+  border-color: var(--banner-amber);
+  background: rgba(180, 83, 9, 0.12);
+}
+
+.chain-gate h2 {
+  color: var(--banner-amber);
 }

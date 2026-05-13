@@ -1,0 +1,14 @@
+# Railway / Nixpacks — root directory for the service should be `bankr-app`.
+# https://nixpacks.com/docs/configuration/file
+
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
+[phases.install]
+cmds = ["npm ci"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
