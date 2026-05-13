@@ -2,7 +2,7 @@
 name: bankr-fee-rights
 description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list at a price in ETH (wei), buy active listings, cancel. Use when the user sells or buys fee rights, lists BFRR for X ETH, buys a listing, listingId, FeeRightsFixedSale, BankrEscrowV3, prepareDeposit, finalizeDeposit, or Doppler fee recipient.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 2
+version: 3
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -103,6 +103,8 @@ prepareDeposit(
 ## List BFRR for sale (seller — after you hold the receipt)
 
 **Collection** is always the **BFRR** contract (`BankrFeeRightsReceipt`). **`tokenId`** is the receipt id (uint256). **`priceWei`** is the ask in **wei** (1 ETH = `1000000000000000000`). There is **no** USDC path in this MVP — **ETH only**.
+
+**Product rule:** If the flow is branded **“Sell rights + list”** (single orchestrated job that includes listing), the UI must **require a positive ETH price** before starting. On-chain **`list` reverts with `ZeroPrice` if `priceWei == 0`**. Do **not** show “0 to skip” for that flow—either **omit the list step entirely** behind a separate “wrap only” entry point, or **require** `priceWei > 0`. Same for labels: step 4 should not read **Optional** if listing is always part of that product.
 
 1. **Choose price in ETH** → convert to wei (e.g. `1.5` ETH → `1500000000000000000`). Double-check decimals: **18** for native ETH in `priceWei`.
 2. **Approve** the marketplace to move your NFT (one-time per collection is enough with `setApprovalForAll`):

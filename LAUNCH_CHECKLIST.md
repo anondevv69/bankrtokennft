@@ -113,6 +113,7 @@ Update the **Bankr Marketplace app** (seller wizard / `bankr-marketplace-v1`, no
 3. **External beneficiary wallet:** call **`POST https://api.bankr.bot/public/doppler/build-transfer-beneficiary`** with `tokenAddress`, `currentBeneficiary`, `newBeneficiary` = escrow → pass returned `to` / `data` / `chainId` into **`confirmTransaction`** (or user’s wallet). User pays gas.
 4. **Resolve metadata** as needed: e.g. `GET /public/doppler/token-fees/:tokenAddress` for pool / initializer per [Bankr docs](https://docs.bankr.bot/token-launching/transferring-fees).
 5. **Gate the wizard:** only advance after **successful** beneficiary transfer (API success or mined tx), then **`finalizeDeposit`** when on-chain reads show escrow shares.
+6. **“Sell + list” orchestration:** If the unified flow includes **`list`**, require a **positive** listing price in ETH before start (`FeeRightsFixedSale` reverts **`ZeroPrice`** for `priceWei == 0`). Do **not** advertise “0 to skip” for that flow; use a separate **“wrap only”** (no list) path if users only want a BFRR without listing.
 
 Reference: [Transferring fees to a new wallet](https://docs.bankr.bot/token-launching/transferring-fees).
 
