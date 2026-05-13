@@ -13,6 +13,26 @@ Foundry consists of:
 
 https://book.getfoundry.sh/
 
+## Bankr fee-rights MVP (Option B)
+
+**Option B** = permissive ERC721 receipt: transferable, composable with wallets and future OpenSea-style surfaces; Bankr provides the primary marketplace UX; **redemption and Bankr rights** stay in `BankrEscrowV3`, not in the sale contract.
+
+**Layers:** escrow + receipt NFT (`BankrEscrowV3`, `BankrFeeRightsReceipt`) → optional **fixed listings and/or offer book** on `FeeRightsFixedSale` (generic `IERC721` only — it never touches fee managers or escrow internals).
+
+**End-to-end flow:** `prepareDeposit` → Bankr beneficiary update → `finalizeDeposit` (mints receipt) → optional `list` / `buy` or standing offers (`placeOffer` / `acceptOffer`) → holder calls `redeemRights` / `withdrawClaimedFees` as documented for V3.
+
+**Sale primitive scope:** fixed listings (`list` / `buy` / `cancel`) plus **unsolicited ETH offers** (`placeOffer` / `withdrawOffer` / `acceptOffer`) on any receipt id; on-chain reads `totalOfferWei` / `offerWei` and `OfferPlaced` events. Fixed price; ETH only; no auctions, royalties, protocol token, or buybacks in this contract.
+
+Authoritative scope and contributor notes: `MVP_ROADMAP.md`.
+
+### Bankr web app (`bankr-app/`)
+
+Vite + React + wagmi on **Base Sepolia**: wallet connect, `totalOfferWei` / `offerWei` reads, place or withdraw offers, collection approval, list / cancel / buy, accept bid. Set `VITE_MARKETPLACE_ADDRESS` (and optionally `VITE_DEFAULT_RECEIPT_COLLECTION`) in `bankr-app/.env` — see `bankr-app/.env.example`.
+
+```shell
+$ cd bankr-app && npm install && npm run dev
+```
+
 ## Usage
 
 ### Build
@@ -130,6 +150,20 @@ See `NFT_RECEIPT_DESIGN.md` for architecture notes. Implemented contracts:
 
 - `src/BankrFeeRightsReceipt.sol` — ERC721 `BFRR`, mint/burn only by escrow.
 - `src/BankrEscrowV3.sol` — same fee flow as V2; `finalizeDeposit` mints the receipt; `redeemRights(tokenId)` gives Bankr rights to the NFT holder; seller `cancelRights` only while they still hold the NFT; `releaseRights` remains admin-only for emergencies.
+
+See `MVP_ROADMAP.md` for how escrow + receipt + fixed sale fit together.
+
+### Fixed-price receipt sale (`FeeRightsFixedSale`)
+
+`src/FeeRightsFixedSale.sol` — ETH marketplace: fixed-price `list` / `buy` / `cancel`, plus **offers** (`placeOffer`, `withdrawOffer`, `acceptOffer`) on any `(collection, tokenId)` even when not listed. Read aggregate bid liquidity with `totalOfferWei(collection, tokenId)`; per-bidder balances with `offerWei`. New offers pause while the same token is in an active fixed listing (bidders can still withdraw). Same “never call Bankr fee rights” rule as in `MVP_ROADMAP.md`.
+
+```shell
+$ source .env
+$ ~/.foundry/bin/forge script script/DeployFeeRightsFixedSale.s.sol \
+  --rpc-url $BASE_SEPOLIA_RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast
+```
 
 Deploy V3 (prints escrow + receipt addresses):
 

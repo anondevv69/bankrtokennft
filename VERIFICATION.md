@@ -119,6 +119,44 @@ Successful test token verification URL:
 https://sepolia.basescan.org/address/0xccbfd0fc0cb16d705f7e3846fdfa319dbf8f92f4
 ```
 
+## FeeRightsFixedSale (fixed-price receipt marketplace)
+
+Deploy first (see `README.md`), then fill in the address and deployment transaction below.
+
+- Contract: `0x…` *(replace after `DeployFeeRightsFixedSale` broadcast)*
+- Transaction: `0x…`
+- Chain ID: `84532`
+
+There is **no** user-defined constructor; do not pass `--constructor-args`.
+
+### Forge verification command
+
+```bash
+source .env
+FEE_RIGHTS_FIXED_SALE=0xYourDeployedAddress
+
+~/.foundry/bin/forge verify-contract \
+  $FEE_RIGHTS_FIXED_SALE \
+  src/FeeRightsFixedSale.sol:FeeRightsFixedSale \
+  --chain 84532 \
+  --verifier etherscan \
+  --etherscan-api-key $ETHERSCAN_API_KEY \
+  --watch
+```
+
+After a successful run, the contract page should show verified source (replace with your checksummed address):
+
+```text
+https://sepolia.basescan.org/address/0xyourdeployedaddress
+```
+
+Confirm bytecode is present before verifying:
+
+```bash
+source .env
+~/.foundry/bin/cast code $FEE_RIGHTS_FIXED_SALE --rpc-url $BASE_SEPOLIA_RPC_URL
+```
+
 ## Dry Verification Prep
 
 Before submitting verification, confirm the constructor args encode successfully:
