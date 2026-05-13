@@ -124,6 +124,10 @@ token0 = 0x4200000000000000000000000000000000000006
 token1 = 0x543f82143bAfd178C335Ce06745A3fE9e61Bcbc3
 ```
 
+### NFT Receipt Design
+
+See `NFT_RECEIPT_DESIGN.md` for the next-phase receipt NFT architecture. This phase starts from the validated Escrow V2 accounting primitive and still excludes marketplace/order-book logic.
+
 ### Doppler SDK Test Launch
 
 Use the Doppler SDK scripts to create a Base Sepolia test launch and discover whether the resulting fee manager is compatible with the Bankr fee-rights escrow ABI.
