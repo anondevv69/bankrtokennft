@@ -1,8 +1,8 @@
 ---
 name: bankr-fee-rights
-description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy on FeeRightsFixedSale. Use when the user sells or buys fee rights, BFRR, BankrEscrowV3, prepareDeposit, finalizeDeposit, Doppler fee recipient, t4 pool, or marketplace listings for receipt NFTs.
+description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list at a price in ETH (wei), buy active listings, cancel. Use when the user sells or buys fee rights, lists BFRR for X ETH, buys a listing, listingId, FeeRightsFixedSale, BankrEscrowV3, prepareDeposit, finalizeDeposit, or Doppler fee recipient.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 1
+version: 2
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -100,11 +100,75 @@ prepareDeposit(
 
 ---
 
-## List / buy (BFRR on marketplace)
+## List BFRR for sale (seller — after you hold the receipt)
 
-- **Collection** = BFRR contract address.
-- **`list`:** seller approves `FeeRightsFixedSale`, then `list(collection, tokenId, priceWei)` (ETH wei).
-- **`buy`:** `buy(listingId)` with `msg.value == priceWei` exactly.
+**Collection** is always the **BFRR** contract (`BankrFeeRightsReceipt`). **`tokenId`** is the receipt id (uint256). **`priceWei`** is the ask in **wei** (1 ETH = `1000000000000000000`). There is **no** USDC path in this MVP — **ETH only**.
+
+1. **Choose price in ETH** → convert to wei (e.g. `1.5` ETH → `1500000000000000000`). Double-check decimals: **18** for native ETH in `priceWei`.
+2. **Approve** the marketplace to move your NFT (one-time per collection is enough with `setApprovalForAll`):
+
+```text
+Send transaction to 0xB9E56dA4B83e77657296D7dE694754bd8b7d00db on Base calling
+setApprovalForAll(0xA8163A62030a74F946eC73422EE692efE68AFE0B, true)
+```
+
+(Use the canonical BFRR + `FeeRightsFixedSale` addresses from the table above if unchanged.)
+
+3. **`list`** — locks the NFT in the marketplace contract until `buy` or `cancel`:
+
+```text
+Send transaction to 0xA8163A62030a74F946eC73422EE692efE68AFE0B on Base calling
+list(
+  0xB9E56dA4B83e77657296D7dE694754bd8b7d00db,
+  <tokenId>,
+  <priceWei>
+)
+```
+
+Returns / emits a **`listingId`** (see `Listed` on BaseScan). Tell the user to **save `listingId`** for buyers.
+
+**Cancel listing:** seller calls `cancel(listingId)` on the same marketplace — NFT returns to seller (does **not** burn BFRR; that is different from escrow `cancelRights`).
+
+---
+
+## Buy BFRR that is listed (buyer)
+
+1. **Get `listingId`** — from marketplace UI, `Listed` events on `FeeRightsFixedSale`, or ask the seller. Optionally **verify on-chain** before paying:
+
+   - Call **`getListing(listingId)`** on the marketplace — check **`active`**, read **`priceWei`**, **`collection`**, **`tokenId`**, **`seller`**.
+
+2. **Pay exactly `priceWei` ETH** in the same transaction as `buy`:
+
+```text
+Send transaction to 0xA8163A62030a74F946eC73422EE692efE68AFE0B on Base
+with value <priceWei> wei
+calling buy(<listingId>)
+```
+
+**Critical:** `msg.value` must **equal** `listing.priceWei` exactly or the contract reverts **`WrongPayment`**. If the listing was cancelled or sold, **`ListingInactive`**.
+
+3. After success, the buyer **holds the BFRR** in their wallet; **redemption / fee claims** still go through **`BankrEscrowV3`** per receipt rules (not covered in one tx here).
+
+---
+
+## Marketplace read helpers (agent / support)
+
+| Call | Purpose |
+|------|---------|
+| `getListing(listingId)` | `collection`, `tokenId`, `seller`, `priceWei`, `active` |
+| `nextListingId()` | Upper bound; scan `Listed` logs or app index for open listings |
+
+---
+
+## List / buy reverts (`FeeRightsFixedSale`)
+
+| Revert | Meaning |
+|--------|---------|
+| `WrongPayment` | `buy`: `msg.value` ≠ listed `priceWei` |
+| `ListingInactive` | `buy` / `cancel`: no active listing for that id |
+| `AlreadyListed` | `list`: asset already has an active listing |
+| `ZeroPrice` | `list`: `priceWei` must be > 0 |
+| `NotSeller` | `cancel`: caller is not listing seller |
 
 ---
 
