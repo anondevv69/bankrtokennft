@@ -635,9 +635,10 @@ export default function App() {
             <a href={`https://bankr.bot/launches/search?q=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">
               bankr.bot launch search for your wallet
             </a>
-            , but powered by a <strong>server-side</strong> Bankr API template so keys never ship in the browser. If
-            this button errors, set <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span> +{" "}
-            <span className="mono">BANKR_API_KEY</span> on Vercel (not <span className="mono">VITE_*</span>).
+            , but powered by a <strong>server-side</strong> URL template (see Vercel env{" "}
+            <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span>
+            ). Use the exact URL from Bankr or Clanker docs; <span className="mono">BANKR_API_KEY</span> is optional if
+            the endpoint is public. Never use <span className="mono">VITE_*</span> for secrets.
           </p>
           {bankrErr && <p className="err">{bankrErr}</p>}
           {bankrRows.length > 0 && (

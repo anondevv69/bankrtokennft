@@ -2,10 +2,12 @@
  * Vercel Serverless — proxies Bankr with a **server-only** API key.
  *
  * Env (set in Vercel → Settings → Environment Variables, **not** prefixed with VITE_):
- *   BANKR_API_KEY              — Bearer or secret Bankr gives you
- *   BANKR_LAUNCHES_API_TEMPLATE — URL with `{address}` replaced by the wallet (lowercase)
- *       Example (fictional — replace with real Bankr base URL + path from their docs):
- *       https://api.bankr.bot/v1/wallets/{address}/launches
+ *   BANKR_LAUNCHES_API_TEMPLATE — **Required.** Full URL to a GET endpoint; put literal `{address}` where the
+ *       wallet (checksummed or not) should go. We substitute it with the query `q` lowercased.
+ *       You must use the **exact** URL Bankr or Clanker documents — we do not know their production host.
+ *       Clanker-style example (verify host + path with Clanker before relying on it):
+ *         https://<CLANKER_API_HOST>/api/tokens/user/{address}
+ *   BANKR_API_KEY              — **Optional.** Omit for public JSON APIs. If set, sent as auth (see below).
  *
  * Optional:
  *   BANKR_AUTH_HEADER  — default "Authorization"
@@ -34,13 +36,14 @@ export default async function handler(req, res) {
 
   const address = q.toLowerCase();
   const template = process.env.BANKR_LAUNCHES_API_TEMPLATE;
-  const apiKey = process.env.BANKR_API_KEY;
+  const apiKey = (process.env.BANKR_API_KEY || "").trim();
 
-  if (!template || !apiKey) {
+  if (!template) {
     res.status(503).json({
       ok: false,
       error: "Bankr API proxy is not configured",
-      hint: "On Vercel, set BANKR_LAUNCHES_API_TEMPLATE and BANKR_API_KEY (server env only — never VITE_).",
+      hint:
+        "Set BANKR_LAUNCHES_API_TEMPLATE on Vercel to the real GET URL (include literal {address}). Example shape from Bankr agent notes: https://<clanker-host>/api/tokens/user/{address} — confirm host with Clanker/Bankr docs. BANKR_API_KEY is optional for public APIs.",
     });
     return;
   }
@@ -48,17 +51,19 @@ export default async function handler(req, res) {
   const upstreamUrl = template.replace(/\{address\}/gi, address);
   const authHeader = process.env.BANKR_AUTH_HEADER || "Authorization";
   const scheme = process.env.BANKR_AUTH_SCHEME;
-  const authValue =
-    scheme === "" ? apiKey : `${scheme || "Bearer"} ${apiKey}`;
+  /** @type {Record<string, string>} */
+  const headers = {
+    Accept: "application/json",
+    "User-Agent": "BankrSale/1.0",
+  };
+  if (apiKey) {
+    headers[authHeader] = scheme === "" ? apiKey : `${scheme || "Bearer"} ${apiKey}`;
+  }
 
   let upstream;
   try {
     upstream = await fetch(upstreamUrl, {
-      headers: {
-        [authHeader]: authValue,
-        Accept: "application/json",
-        "User-Agent": "BankrSale/1.0",
-      },
+      headers,
     });
   } catch (e) {
     res.status(502).json({ ok: false, error: "Upstream fetch failed", detail: String(e) });
