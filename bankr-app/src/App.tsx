@@ -627,7 +627,7 @@ export default function App() {
           <div className="section-head">
             <h2>Bankr launches</h2>
             <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load from Bankr API"}
+              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load Bankr launches"}
             </button>
           </div>
           <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>

@@ -1,17 +1,21 @@
 /**
- * Vercel Serverless — proxies Bankr with a **server-only** API key.
+ * Vercel / Node serverless — proxies Bankr token-launch APIs (secrets stay server-side).
  *
- * Env (set in Vercel → Settings → Environment Variables, **not** prefixed with VITE_):
- *   BANKR_LAUNCHES_API_TEMPLATE — **Required.** Full URL to a GET endpoint; put literal `{address}` where the
- *       wallet (checksummed or not) should go. We substitute it with the query `q` lowercased.
- *       You must use the **exact** URL Bankr or Clanker documents — we do not know their production host.
- *       Clanker-style example (verify host + path with Clanker before relying on it):
- *         https://<CLANKER_API_HOST>/api/tokens/user/{address}
- *   BANKR_API_KEY              — **Optional.** Omit for public JSON APIs. If set, sent as auth (see below).
+ * Docs (list launches — unauthenticated):
+ *   https://docs.bankr.bot/token-launching/api-reference/list-token-launches/
  *
- * Optional:
- *   BANKR_AUTH_HEADER  — default "Authorization"
- *   BANKR_AUTH_SCHEME  — default "Bearer" (set to "" to send raw key, or "Token", etc.)
+ * Env (Vercel / Railway **server** env — never `VITE_*`):
+ *   BANKR_LAUNCHES_API_TEMPLATE — Optional. Defaults to:
+ *       https://api.bankr.bot/token-launches
+ *     Use another GET URL if needed; include `{address}` only if the upstream path needs it
+ *     (e.g. Clanker). If the URL has no `{address}`, we still require query `q` to filter results for the wallet.
+ *   BANKR_API_KEY — Optional. List endpoint is public; use for other upstreams that need auth.
+ *   BANKR_AUTH_HEADER / BANKR_AUTH_SCHEME — Optional auth shape (see previous handler logic).
+ *
+ * Query: GET /api/bankr-launches?q=0x…Wallet
+ * For https://api.bankr.bot/token-launches we fetch the global list then return only launches where
+ * feeRecipient.walletAddress or deployer.walletAddress matches `q` (case-insensitive).
+ * Limitation: only the **50 most recent** launches exist in that API — older launches won’t appear.
  */
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -35,20 +39,15 @@ export default async function handler(req, res) {
   }
 
   const address = q.toLowerCase();
-  const template = process.env.BANKR_LAUNCHES_API_TEMPLATE;
+  const rawTemplate = (process.env.BANKR_LAUNCHES_API_TEMPLATE || "").trim();
+  const template =
+    rawTemplate || "https://api.bankr.bot/token-launches";
   const apiKey = (process.env.BANKR_API_KEY || "").trim();
 
-  if (!template) {
-    res.status(503).json({
-      ok: false,
-      error: "Bankr API proxy is not configured",
-      hint:
-        "Set BANKR_LAUNCHES_API_TEMPLATE on Vercel to the real GET URL (include literal {address}). Example shape from Bankr agent notes: https://<clanker-host>/api/tokens/user/{address} — confirm host with Clanker/Bankr docs. BANKR_API_KEY is optional for public APIs.",
-    });
-    return;
-  }
+  const upstreamUrl = template.includes("{address}")
+    ? template.replace(/\{address\}/gi, address)
+    : template;
 
-  const upstreamUrl = template.replace(/\{address\}/gi, address);
   const authHeader = process.env.BANKR_AUTH_HEADER || "Authorization";
   const scheme = process.env.BANKR_AUTH_SCHEME;
   /** @type {Record<string, string>} */
@@ -86,6 +85,40 @@ export default async function handler(req, res) {
       body: typeof body === "string" ? body.slice(0, 2000) : body,
     });
     return;
+  }
+
+  /** @param {unknown} w */
+  const walletMatches = (w) => {
+    if (!w || typeof w !== "object") return false;
+    const a = /** @type {{ walletAddress?: string }} */ (w).walletAddress;
+    return typeof a === "string" && a.toLowerCase() === address;
+  };
+
+  const isBankrList =
+    typeof upstreamUrl === "string" &&
+    upstreamUrl.replace(/\/$/, "").endsWith("token-launches");
+
+  if (
+    body &&
+    typeof body === "object" &&
+    Array.isArray(/** @type {{ launches?: unknown[] }} */ (body).launches) &&
+    (isBankrList || rawTemplate === "")
+  ) {
+    const all = /** @type {{ launches: Record<string, unknown>[] }} */ (body).launches;
+    const filtered = all.filter(
+      (L) =>
+        walletMatches(L.feeRecipient) || walletMatches(L.deployer),
+    );
+    body = {
+      launches: filtered,
+      __meta: {
+        source: upstreamUrl,
+        totalFromApi: all.length,
+        matchedForWallet: address,
+        note:
+          "Subset where feeRecipient or deployer equals q. Bankr list API returns at most 50 recent launches — older tokens are not included.",
+      },
+    };
   }
 
   res.status(200).json({ ok: true, address, upstreamUrl, data: body });
