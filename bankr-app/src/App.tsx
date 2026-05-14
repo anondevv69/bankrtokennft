@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -44,7 +44,7 @@ function envAddr(name: string): string {
   return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
 }
 
-const ESCROW_DEFAULT: Address = "0x9CFD0AF884791b7c4BCC77f987bf0fa89b2064cB";
+const ESCROW_DEFAULT: Address = "0xFb28D9C636514f8a9D129873750F9b886707d95F";
 
 function escrowAddressFromEnv(): Address {
   const raw = (import.meta as ImportMeta).env.VITE_ESCROW_ADDRESS;
@@ -101,53 +101,6 @@ function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   if (typeof id === "string" && id.length > 0)
     return `https://bankr.bot/launches/${encodeURIComponent(id)}`;
   return `https://bankr.bot/launches/search?q=${encodeURIComponent(wallet)}`;
-}
-
-/** Bankr docs — launching, escrow, receipts (flows not duplicated in this marketplace UI). */
-function bankrTokenLaunchingDocsHref() {
-  return "https://docs.bankr.bot/token-launching/";
-}
-
-function normPoolIdHex(raw: unknown): string | null {
-  if (typeof raw !== "string" || !raw.startsWith("0x")) return null;
-  const h = raw.toLowerCase();
-  return /^0x[0-9a-f]{64}$/.test(h) ? h : null;
-}
-
-/** Match Bankr creator-fees row to a BFRR tokenId already in this wallet (positionOf). */
-async function findBfrrTokenIdForBankrRow(
-  publicClient: PublicClient,
-  collection: Address,
-  tokenIds: string[],
-  row: Record<string, unknown>,
-): Promise<string | null> {
-  const poolHex = normPoolIdHex(row.poolId);
-  const tokRaw = row.tokenAddress;
-  const tokenAddr =
-    typeof tokRaw === "string" && tokRaw.startsWith("0x") && isAddress(tokRaw, { strict: false })
-      ? getAddress(tokRaw)
-      : null;
-
-  for (const id of tokenIds) {
-    try {
-      const pos = await publicClient.readContract({
-        address: collection,
-        abi: bankrFeeRightsReceiptAbi,
-        functionName: "positionOf",
-        args: [BigInt(id)],
-      });
-      const pid = typeof pos.poolId === "string" ? pos.poolId.toLowerCase() : "";
-      if (poolHex && pid === poolHex) return id;
-      if (tokenAddr) {
-        const t0 = getAddress(pos.token0);
-        const t1 = getAddress(pos.token1);
-        if (t0 === tokenAddr || t1 === tokenAddr) return id;
-      }
-    } catch {
-      /* RPC or invalid id */
-    }
-  }
-  return null;
 }
 
 function parseNftImage(tokenUri: unknown): string | null {
@@ -240,9 +193,11 @@ async function fetchActiveListings(
 
 // ── BfrrCard ─────────────────────────────────────────────────────────────────
 
-function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick }: {
+function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, staticDisplay }: {
   tokenId: string; collection: Address; selected: boolean;
-  wrongNetwork: boolean; onClick: () => void;
+  wrongNetwork: boolean; onClick?: () => void;
+  /** When true, render a non-interactive preview (e.g. next to profile actions). */
+  staticDisplay?: boolean;
 }) {
   const tid = useMemo(() => { try { return BigInt(id); } catch { return null; } }, [id]);
 
@@ -259,8 +214,8 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick }: 
 
   const imgSrc = useMemo(() => parseNftImage(rawUri), [rawUri]);
 
-  return (
-    <button type="button" className={`bfrr-card${selected ? " active" : ""}`} onClick={onClick}>
+  const body = (
+    <>
       {imgSrc ? (
         <img className="bfrr-card__img" src={imgSrc}
           alt={serial !== undefined ? `BFRR #${String(serial)}` : "BFRR"} />
@@ -275,6 +230,20 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick }: 
           {serial !== undefined ? `#${String(serial)}` : id.slice(0, 6) + "…" + id.slice(-4)}
         </div>
       </div>
+    </>
+  );
+
+  if (staticDisplay) {
+    return (
+      <div className={`bfrr-card bfrr-card--static${selected ? " active" : ""}`}>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button type="button" className={`bfrr-card${selected ? " active" : ""}`} onClick={onClick}>
+      {body}
     </button>
   );
 }
@@ -318,11 +287,11 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__meta">
           <div className="listing-card__meta-row">
-            <span>Seller</span>
+            <span>From</span>
             <span className="mono">{shortAddr(li.seller)}</span>
           </div>
           <div className="listing-card__meta-row">
-            <span>Token</span>
+            <span>Item</span>
             <span className="mono">{serial !== undefined ? `#${String(serial)}` : shortAddr(li.tokenId.toString())}</span>
           </div>
         </div>
@@ -330,7 +299,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
           {imSeller ? (
             <button type="button" className="btn btn-danger btn-sm btn-full"
               disabled={txDisabled} onClick={onCancel}>
-              Cancel listing
+              Cancel sale
             </button>
           ) : (
             <button type="button" className="btn btn-primary btn-full"
@@ -391,15 +360,14 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   return (
     <div className="sell-panel">
       <div className="sell-panel__title">
-        Sell
+        List for sale
         <span className="tag mono">{tokenIdStr.slice(0, 6)}…{tokenIdStr.slice(-4)}</span>
         <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }}
           onClick={onDone}>✕</button>
       </div>
 
-      {/* Price + list */}
       <div className="sell-row">
-        <label>Price</label>
+        <label>Asking price</label>
         <div className="price-wrap">
           <input value={price} onChange={e => setPrice(e.target.value)} placeholder="0.01" />
           <span className="price-suffix">ETH</span>
@@ -408,7 +376,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 
       <div className="sell-actions">
         {canPull ? (
-          <span className="approved-tag">✓ Approved</span>
+          <span className="approved-tag">Ready to list</span>
         ) : (
           <button type="button" className="btn btn-ghost"
             disabled={txDisabled || tokenId === null}
@@ -418,7 +386,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
                 args: [marketplace, tokenId!], chainId: MVP_CHAIN_ID,
               });
             })}>
-            {isPending ? <><span className="spinner" />Wallet…</> : "1. Approve"}
+            {isPending ? <><span className="spinner" />Wallet…</> : "Allow marketplace"}
           </button>
         )}
         <button type="button" className="btn btn-primary"
@@ -430,64 +398,28 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
             });
             onDone();
           })}>
-          {isPending ? <><span className="spinner" />Wallet…</> : `${canPull ? "" : "2. "}List`}
+          {isPending ? <><span className="spinner" />Wallet…</> : "List"}
         </button>
       </div>
 
-      {/* Redeem rights */}
       <div className="redeem-row">
         <div className="redeem-label">
-          <span>Redeem fee rights</span>
-          <strong>
-            {bfrrOwner ? (isBfrrOwner ? "You hold this BFRR" : `Held by ${shortAddr(bfrrOwner as string)}`) : "…"}
+          <span>Leave escrow</span>
+          <strong className="muted" style={{ fontWeight: 500, fontSize: "0.78rem" }}>
+            Returns creator fees to you and removes the receipt from sale.
           </strong>
         </div>
         <button type="button" className="btn btn-ghost btn-sm"
           disabled={txDisabled || !isBfrrOwner || tokenId === null}
-          title={!isBfrrOwner ? "Connect the wallet that holds this BFRR" : "Burns BFRR → you become fee beneficiary"}
+          title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
           onClick={() => run(async () => {
             await writeContractAsync({
               address: ESCROW_ADDRESS, abi: escrowAbi, functionName: "redeemRights",
               args: [tokenId!], chainId: MVP_CHAIN_ID,
             });
           })}>
-          {isPending ? <><span className="spinner" />…</> : "Redeem"}
+          {isPending ? <><span className="spinner" />…</> : "Cancel escrow"}
         </button>
-      </div>
-    </div>
-  );
-}
-
-function MintEscrowCallout({ cta, onDismiss, onMintHere }: {
-  cta: { label: string; href: string; row: Record<string, unknown> };
-  onDismiss: () => void;
-  onMintHere: () => void;
-}) {
-  return (
-    <div className="escrow-callout">
-      <div className="escrow-callout__head">
-        <span className="escrow-callout__title">{cta.label}</span>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>Dismiss</button>
-      </div>
-      <p className="escrow-callout__blurb">
-        This marketplace lists BFRRs after mint. You can <strong>mint here</strong> (three wallet steps on{" "}
-        <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
-          BankrEscrowV3
-        </a>
-        ) or continue on{" "}
-        <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>
-        . Non‑WETH pools may need a future override for token0/token1.
-      </p>
-      <div className="escrow-callout__actions">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onMintHere}>
-          Mint BFRR here (escrow)
-        </button>
-        <a className="btn btn-ghost btn-sm" href={cta.href} target="_blank" rel="noreferrer">
-          Open Bankr
-        </a>
-        <a className="btn btn-ghost btn-sm" href={bankrTokenLaunchingDocsHref()} target="_blank" rel="noreferrer">
-          Token launching docs
-        </a>
       </div>
     </div>
   );
@@ -547,17 +479,9 @@ export default function App() {
   const [bankrLoading, setBankrLoading] = useState(false);
   const [bankrErr, setBankrErr] = useState<string | null>(null);
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
-  const [bankrRowBusy, setBankrRowBusy] = useState(false);
-  const [bankrClickMsg, setBankrClickMsg] = useState<string | null>(null);
-  /** Shown after clicking a Bankr row when this wallet has no BFRR yet — Bankr link + optional in-app escrow. */
-  const [bankrMintCta, setBankrMintCta] = useState<{
-    label: string;
-    href: string;
-    row: Record<string, unknown>;
-  } | null>(null);
   const [escrowWizardRow, setEscrowWizardRow] = useState<Record<string, unknown> | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
-  const bfrrSectionRef = useRef<HTMLElement | null>(null);
+  const [mainTab, setMainTab] = useState<"home" | "profile">("home");
 
   const marketplace = tryParseAddress(mpInput);
   const collection  = tryParseAddress(colInput);
@@ -574,10 +498,6 @@ export default function App() {
     const set = new Set([...scannedIds, ...manualIds]);
     return [...set].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
   }, [scannedIds, manualIds]);
-
-  useEffect(() => {
-    if (allTokenIds.length > 0) setBankrMintCta(null);
-  }, [allTokenIds.length]);
 
   // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
   useEffect(() => {
@@ -624,6 +544,29 @@ export default function App() {
     staleTime: 12_000,
   });
 
+  const myListings = useMemo(() => {
+    if (!address) return [];
+    const me = getAddress(address);
+    return (activeListings as ActiveListing[]).filter(
+      (li) => isAddress(li.seller) && getAddress(li.seller) === me,
+    );
+  }, [activeListings, address]);
+
+  const myListedTokenIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!collection) return set;
+    const col = getAddress(collection);
+    for (const li of myListings) {
+      if (getAddress(li.collection) === col) set.add(li.tokenId.toString());
+    }
+    return set;
+  }, [myListings, collection]);
+
+  const unlistedBfrrIds = useMemo(
+    () => allTokenIds.filter((id) => !myListedTokenIds.has(id)),
+    [allTokenIds, myListedTokenIds],
+  );
+
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
     try { await fn(); invalidate(); } catch { /* surfaced via writeError */ }
@@ -633,8 +576,6 @@ export default function App() {
     if (!address) return;
     setBankrLoading(true);
     setBankrErr(null);
-    setBankrClickMsg(null);
-    setBankrMintCta(null);
     try {
       const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
       const json = (await res.json()) as {
@@ -662,8 +603,6 @@ export default function App() {
   }, [address]);
 
   useEffect(() => {
-    setBankrClickMsg(null);
-    setBankrMintCta(null);
     if (!address) {
       setBankrRows([]);
       setBankrErr(null);
@@ -679,75 +618,39 @@ export default function App() {
     void loadBankrLaunches();
   }, [isConnected, address, wrongNetwork, loadBankrLaunches]);
 
-  const scrollToBfrr = () => {
-    requestAnimationFrame(() => {
-      bfrrSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
-
-  const onBankrTokenClick = async (row: Record<string, unknown>) => {
-    setBankrClickMsg(null);
-    if (!publicClient) {
-      setBankrClickMsg("Wallet RPC not ready — try again in a moment.");
-      return;
-    }
-
-    if (allTokenIds.length === 0) {
-      setBankrMintCta({
-        label: launchRowLabel(row),
-        href: launchRowHref(row, address ?? ""),
-        row,
-      });
-      if (collection) scrollToBfrr();
-      return;
-    }
-
-    if (!collection) {
-      setBankrClickMsg("Set the BFRR contract address in ⚙ settings to match this token to a receipt.");
-      return;
-    }
-
-    setBankrRowBusy(true);
-    try {
-      const matched = await findBfrrTokenIdForBankrRow(publicClient, collection, allTokenIds, row);
-      if (matched) {
-        setBankrMintCta(null);
-        setSelectedId(matched);
-        setBankrClickMsg(null);
-        scrollToBfrr();
-      } else {
-        setBankrMintCta({
-          label: launchRowLabel(row),
-          href: launchRowHref(row, address ?? ""),
-          row,
-        });
-        setBankrClickMsg(
-          "No BFRR on file matches that pool. Paste the BFRR token ID below, Add, then click the token again — " +
-            "or mint via Bankr first.",
-        );
-        scrollToBfrr();
-      }
-    } catch {
-      setBankrClickMsg("Could not read BFRR positions — check RPC or BFRR contract in settings.");
-    } finally {
-      setBankrRowBusy(false);
-    }
-  };
-
   return (
     <div>
-      {/* ── Nav ── */}
       <nav className="nav">
-        <div className="nav-logo">Bankr <span>Sale</span></div>
+        <div className="nav-left">
+          <div className="nav-logo">Bankr <span>Sale</span></div>
+          <div className="app-tabs" role="tablist" aria-label="Main sections">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainTab === "home"}
+              className={`app-tab${mainTab === "home" ? " app-tab--active" : ""}`}
+              onClick={() => setMainTab("home")}
+            >
+              Home
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainTab === "profile"}
+              className={`app-tab${mainTab === "profile" ? " app-tab--active" : ""}`}
+              onClick={() => setMainTab("profile")}
+            >
+              My profile
+            </button>
+          </div>
+        </div>
         <div className="nav-right">
           {isConnected && address ? (
-            <>
-              <div className="wallet-pill">
-                <span className="wallet-dot" />
-                <span className="wallet-addr">{shortAddr(address)}</span>
-                <button className="gear-btn" onClick={() => disconnect()} title="Disconnect">✕</button>
-              </div>
-            </>
+            <div className="wallet-pill">
+              <span className="wallet-dot" />
+              <span className="wallet-addr">{shortAddr(address)}</span>
+              <button className="gear-btn" onClick={() => disconnect()} title="Disconnect">✕</button>
+            </div>
           ) : (
             <div className="connect-strip">
               {connectors.map((c, i) => {
@@ -766,273 +669,362 @@ export default function App() {
               })}
             </div>
           )}
-          <button className="gear-btn" title="Settings" onClick={() => setShowSettings(v => !v)}>⚙</button>
+          <button className="gear-btn" title="Settings" onClick={() => setShowSettings((v) => !v)}>⚙</button>
         </div>
       </nav>
 
-      {/* ── Network warning ── */}
       {wrongNetwork && (
         <div className="network-banner">
-          <span>Switch to Base mainnet</span>
+          <span>Use Base to trade here</span>
           <button className="btn btn-ghost btn-sm" disabled={switchPending}
             onClick={() => switchChain?.({ chainId: MVP_CHAIN_ID })}>
-            {switchPending ? "Switching…" : "Switch"}
+            {switchPending ? "Switching…" : "Switch to Base"}
           </button>
         </div>
       )}
 
-      {/* ── Hero ── */}
-      <div className="hero">
-        <h1>Fee Rights <span>Marketplace</span></h1>
-        <p>Buy and sell Bankr fee rights receipts on Base.</p>
-      </div>
-
-      <details className="bfrr-primer">
-        <summary>Why don’t I see a BFRR yet?</summary>
-        <div className="bfrr-primer__body">
-          <p>
-            You only sell <strong>BFRR NFTs</strong> in your wallet. Fee-recipient on Bankr is not the same — finish
-            escrow on{" "}
-            <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>{" "}
-            so{" "}
-            <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
-              BankrEscrowV3
-            </a>{" "}
-            can mint the receipt, then it shows here (or paste the token ID from BaseScan).
-          </p>
-        </div>
-      </details>
-
-      {/* ── Bankr creator fees (server proxy — optional) ── */}
-      {isConnected && address && !wrongNetwork && (
-        <section className="bankr-panel">
-          <div className="section-head">
-            <h2>Your Bankr tokens (fees)</h2>
-            <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-              {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
-            </button>
-          </div>
-          <div className="muted one-liner">
-            From Bankr’s API. Click a name to match a BFRR or show mint options; use <strong>Mint</strong> for the in-app escrow wizard.
-            {" "}
-            <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">docs</a>
-            {" · "}
-            <details className="inline-details">
-              <summary>Deploy / env</summary>
-              <span className="mono">/api/bankr-launches</span>, <span className="mono">/api/bankr-build-transfer</span> on Vercel. Optional{" "}
-              <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span>,{" "}
-              <span className="mono">BANKR_CREATOR_FEES_DAYS</span>.
-            </details>
-          </div>
-          {bankrErr && <p className="err">{bankrErr}</p>}
-          {bankrClickMsg && <p className="muted bankr-panel__hint">{bankrClickMsg}</p>}
-          {bankrMintCta && !collection && (
-            <MintEscrowCallout
-              cta={bankrMintCta}
-              onDismiss={() => setBankrMintCta(null)}
-              onMintHere={() => {
-                setEscrowWizardRow(bankrMintCta.row);
-                setBankrMintCta(null);
-              }}
-            />
-          )}
-          {bankrRows.length > 0 && (
-            <ul className="bankr-panel__list">
-              {bankrRows.map((row, i) => {
-                const ta = row.tokenAddress;
-                const pid = row.poolId;
-                const key =
-                  typeof ta === "string" && ta.startsWith("0x")
-                    ? ta.toLowerCase()
-                    : typeof pid === "string"
-                      ? `${pid}-${i}`
-                      : `row-${i}`;
-                return (
-                  <li key={key}>
-                    <div className="bankr-panel__row">
-                      <button
-                        type="button"
-                        className="bankr-panel__token"
-                        disabled={bankrRowBusy || wrongNetwork}
-                        onClick={() => void onBankrTokenClick(row)}
-                        title="Match BFRR to sell, or open Bankr to mint one first"
-                      >
-                        {launchRowLabel(row)}
-                      </button>
-                      <a
-                        className="bankr-panel__row-ext"
-                        href={launchRowHref(row, address)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open on Bankr"
-                      >
-                        ↗
-                      </a>
-                      <button
-                        type="button"
-                        className="bankr-panel__mint btn btn-ghost btn-sm"
-                        disabled={bankrRowBusy || wrongNetwork}
-                        title="Mint BFRR via escrow on this site"
-                        onClick={() => {
-                          setBankrClickMsg(null);
-                          setEscrowWizardRow(row);
-                        }}
-                      >
-                        Mint
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {!bankrLoading && !bankrErr && bankrRows.length === 0 && (
-            <p className="muted one-liner">No creator-fee tokens returned for this wallet.</p>
-          )}
-        </section>
-      )}
-
-      {/* ── Your BFRRs ── */}
-      {isConnected && address && !wrongNetwork && collection && (
-        <section ref={bfrrSectionRef}>
-          <div className="section-head">
-            <h2>Your BFRRs</h2>
-            <span className="scan-status">
-              {scanning ? <><span className="spinner" />Scanning…</> : `${allTokenIds.length} shown`}
-            </span>
+      {mainTab === "home" && (
+        <>
+          <div className="hero hero--compact">
+            <h1>Tokens for sale</h1>
+            <p className="muted">Creator fee rights · Base</p>
           </div>
 
-          <p className="muted one-liner">
-            BFRRs you hold on Base. Not the same as Bankr fee-recipient until escrow mints the receipt.{" "}
-            <a href={`https://basescan.org/token/${collection}?a=${address ?? ""}`} target="_blank" rel="noreferrer">
-              BaseScan inventory
-            </a>
-            {" — "}paste token ID if the scan missed it.
-          </p>
+          <section>
+            <div className="section-head">
+              <h2>All listings</h2>
+              <button type="button" className="btn btn-ghost btn-sm"
+                disabled={!marketplace || listingsLoading}
+                onClick={() => void refetchListings()}>
+                Refresh
+              </button>
+            </div>
 
-          {bankrMintCta && (
-            <MintEscrowCallout
-              cta={bankrMintCta}
-              onDismiss={() => setBankrMintCta(null)}
-              onMintHere={() => {
-                setEscrowWizardRow(bankrMintCta.row);
-                setBankrMintCta(null);
-              }}
-            />
-          )}
+            {listingsLoading && <p className="empty"><span className="spinner" />Loading…</p>}
 
-          {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
+            {!listingsLoading && (activeListings as ActiveListing[]).length === 0 && (
+              <p className="empty">{marketplace ? "Nothing for sale right now." : "Set the marketplace address in settings (⚙)."}</p>
+            )}
 
-          {!scanning && allTokenIds.length === 0 && (
-            <p className="empty">
-              No BFRR transfers found in the last {(Number(scanBlockSpan) / 1000).toFixed(0)}k blocks.
-            </p>
-          )}
-
-          <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-            <input
-              className="mono"
-              style={{ flex: "1 1 200px", minWidth: 0 }}
-              placeholder="Paste full token ID (uint256)"
-              value={pasteId}
-              onChange={(e) => setPasteId(e.target.value)}
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                const t = pasteId.trim();
-                if (!t) return;
-                try {
-                  const id = BigInt(t).toString();
-                  setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-                  setSelectedId(id);
-                  setPasteId("");
-                } catch {
-                  /* invalid */
-                }
-              }}
-            >
-              Add
-            </button>
-          </div>
-
-          {allTokenIds.length > 0 && (
-            <div className="bfrr-grid">
-              {allTokenIds.map((id) => (
-                <BfrrCard
-                  key={id}
-                  tokenId={id}
-                  collection={collection}
-                  selected={selectedId === id}
+            <div className="listings-grid">
+              {(activeListings as ActiveListing[]).map((li) => (
+                <ListingCard
+                  key={li.listingId.toString()}
+                  li={li}
+                  bfrr={collection}
+                  address={address}
+                  txDisabled={txDisabled}
+                  isConnected={isConnected}
                   wrongNetwork={wrongNetwork}
-                  onClick={() => setSelectedId((prev) => (prev === id ? null : id))}
+                  onBuy={() => run(async () => {
+                    if (!marketplace) return;
+                    await writeContractAsync({
+                      address: marketplace,
+                      abi: feeRightsFixedSaleAbi,
+                      functionName: "buy",
+                      args: [li.listingId],
+                      value: li.priceWei,
+                      chainId: MVP_CHAIN_ID,
+                    });
+                  })}
+                  onCancel={() => run(async () => {
+                    if (!marketplace) return;
+                    await writeContractAsync({
+                      address: marketplace,
+                      abi: feeRightsFixedSaleAbi,
+                      functionName: "cancel",
+                      args: [li.listingId],
+                      chainId: MVP_CHAIN_ID,
+                    });
+                  })}
                 />
               ))}
             </div>
-          )}
+          </section>
 
-          {selectedId && marketplace && address && (
-            <SellPanel
-              tokenIdStr={selectedId}
-              collection={collection}
-              marketplace={marketplace}
-              address={address}
-              txDisabled={txDisabled}
-              wrongNetwork={wrongNetwork}
-              isConnected={isConnected}
-              onDone={() => {
-                setSelectedId(null);
-                invalidate();
-                refetchListings();
-              }}
-            />
-          )}
-        </section>
+          <p className="muted profile-tab-hint">
+            Selling something of your own? Open{" "}
+            <button type="button" className="link-btn" onClick={() => setMainTab("profile")}>My profile</button>.
+          </p>
+        </>
       )}
 
-      {/* ── Marketplace listings ── */}
-      <section>
-        <div className="section-head">
-          <h2>Listings</h2>
-          <button type="button" className="btn btn-ghost btn-sm"
-            disabled={!marketplace || listingsLoading}
-            onClick={() => void refetchListings()}>
-            Refresh
-          </button>
-        </div>
+      {mainTab === "profile" && (
+        <>
+          <div className="hero hero--compact">
+            <h1>My profile</h1>
+            <p className="muted">Wallet, your listings, and items you can sell.</p>
+          </div>
 
-        {listingsLoading && <p className="empty"><span className="spinner" />Loading…</p>}
+          {!isConnected && (
+            <div className="profile-gate">
+              <p>Connect a wallet to see your tokens and listings.</p>
+              <div className="connect-strip">
+                {connectors.map((c, i) => {
+                  const label = typeof c === "object" && "name" in c ? String((c as { name: string }).name) : "Wallet";
+                  const uid = typeof c === "object" && "uid" in c ? (c as { uid: string }).uid : null;
+                  const cvUid = typeof connectVars?.connector === "object" && connectVars?.connector !== null && "uid" in connectVars.connector
+                    ? (connectVars.connector as { uid: string }).uid : null;
+                  const busy = connectPending && uid && cvUid && uid === cvUid;
+                  return (
+                    <button key={`${i}-${label}`} type="button" className="btn btn-ghost btn-sm"
+                      disabled={connectPending}
+                      onClick={() => connect({ connector: c, chainId: MVP_CHAIN_ID })}>
+                      {busy ? "…" : label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-        {!listingsLoading && (activeListings as ActiveListing[]).length === 0 && (
-          <p className="empty">{marketplace ? "No active listings." : "Configure the marketplace address in settings ⚙"}</p>
-        )}
+          {isConnected && address && (
+            <div className="profile-wallet-card">
+              <div className="profile-wallet-card__row">
+                <span className="profile-wallet-card__label">Wallet</span>
+                <span className="profile-wallet-card__status">Connected</span>
+              </div>
+              <p className="profile-wallet-card__address mono" title={address}>{address}</p>
+              <div className="profile-wallet-card__actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(address);
+                  }}
+                >
+                  Copy address
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => disconnect()}>
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          )}
 
-        <div className="listings-grid">
-          {(activeListings as ActiveListing[]).map(li => (
-            <ListingCard
-              key={li.listingId.toString()}
-              li={li} bfrr={collection} address={address}
-              txDisabled={txDisabled} isConnected={isConnected} wrongNetwork={wrongNetwork}
-              onBuy={() => run(async () => {
-                if (!marketplace) return;
-                await writeContractAsync({
-                  address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "buy",
-                  args: [li.listingId], value: li.priceWei, chainId: MVP_CHAIN_ID,
-                });
-              })}
-              onCancel={() => run(async () => {
-                if (!marketplace) return;
-                await writeContractAsync({
-                  address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "cancel",
-                  args: [li.listingId], chainId: MVP_CHAIN_ID,
-                });
-              })}
-            />
-          ))}
-        </div>
-      </section>
+          {isConnected && address && !wrongNetwork && (
+            <>
+              <section>
+                <div className="section-head">
+                  <h2>Your listings</h2>
+                  <span className="scan-status">{myListings.length} active</span>
+                </div>
+                <p className="muted one-liner">Items you have listed for sale. Cancel returns the token to your wallet.</p>
+                {myListings.length === 0 ? (
+                  <p className="empty">You have no active listings.</p>
+                ) : (
+                  <div className="listings-grid">
+                    {myListings.map((li) => (
+                      <ListingCard
+                        key={li.listingId.toString()}
+                        li={li}
+                        bfrr={collection}
+                        address={address}
+                        txDisabled={txDisabled}
+                        isConnected={isConnected}
+                        wrongNetwork={wrongNetwork}
+                        onBuy={() => {}}
+                        onCancel={() => run(async () => {
+                          if (!marketplace) return;
+                          await writeContractAsync({
+                            address: marketplace,
+                            abi: feeRightsFixedSaleAbi,
+                            functionName: "cancel",
+                            args: [li.listingId],
+                            chainId: MVP_CHAIN_ID,
+                          });
+                        })}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {collection && marketplace && (
+                <section>
+                  <div className="section-head">
+                    <h2>Ready to list</h2>
+                    <span className="scan-status">
+                      {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrIds.length} in wallet`}
+                    </span>
+                  </div>
+                  <p className="muted one-liner">
+                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Cancel escrow</strong> to pull fee rights back from escrow.
+                  </p>
+
+                  {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
+
+                  {!scanning && unlistedBfrrIds.length === 0 && allTokenIds.length === 0 && (
+                    <p className="empty">No receipts found in recent transfers. Paste your token ID if you already have one.</p>
+                  )}
+
+                  <div className="profile-paste-row">
+                    <input
+                      className="mono"
+                      placeholder="Paste token ID"
+                      value={pasteId}
+                      onChange={(e) => setPasteId(e.target.value)}
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        const t = pasteId.trim();
+                        if (!t) return;
+                        try {
+                          const id = BigInt(t).toString();
+                          setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+                          setSelectedId(id);
+                          setPasteId("");
+                        } catch {
+                          /* invalid */
+                        }
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  <div className="profile-receipt-list">
+                    {unlistedBfrrIds.map((id) => (
+                      <div key={id} className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}`}>
+                        <BfrrCard
+                          tokenId={id}
+                          collection={collection}
+                          selected={selectedId === id}
+                          wrongNetwork={wrongNetwork}
+                          staticDisplay
+                        />
+                        <div className="profile-receipt-row__actions">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={txDisabled}
+                            onClick={() => setSelectedId(id)}
+                          >
+                            Sell
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={txDisabled}
+                            onClick={() => run(async () => {
+                              await writeContractAsync({
+                                address: ESCROW_ADDRESS,
+                                abi: escrowAbi,
+                                functionName: "redeemRights",
+                                args: [BigInt(id)],
+                                chainId: MVP_CHAIN_ID,
+                              });
+                              setSelectedId(null);
+                              setScanEpoch((e) => e + 1);
+                              void refetchListings();
+                            })}
+                          >
+                            Cancel escrow
+                          </button>
+                        </div>
+                        {selectedId === id && (
+                          <div className="profile-receipt-row__panel">
+                            <SellPanel
+                              tokenIdStr={id}
+                              collection={collection}
+                              marketplace={marketplace}
+                              address={address}
+                              txDisabled={txDisabled}
+                              wrongNetwork={wrongNetwork}
+                              isConnected={isConnected}
+                              onDone={() => {
+                                setSelectedId(null);
+                                invalidate();
+                                void refetchListings();
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {(!collection || !marketplace) && (
+                <p className="muted one-liner" style={{ marginTop: "1rem" }}>
+                  Open{" "}
+                  <button type="button" className="link-btn" onClick={() => setShowSettings(true)}>settings</button>
+                  {" "}to add the marketplace and receipt addresses.
+                </p>
+              )}
+
+              <section className="bankr-panel">
+                <div className="section-head">
+                  <h2>Waiting on a receipt</h2>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
+                    {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
+                  </button>
+                </div>
+                <p className="muted one-liner">
+                  Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
+                </p>
+                {bankrErr && <p className="err">{bankrErr}</p>}
+                {bankrRows.length > 0 ? (
+                  <ul className="bankr-panel__list">
+                    {bankrRows.map((row, i) => {
+                      const ta = row.tokenAddress;
+                      const pid = row.poolId;
+                      const key =
+                        typeof ta === "string" && ta.startsWith("0x")
+                          ? ta.toLowerCase()
+                          : typeof pid === "string"
+                            ? `${pid}-${i}`
+                            : `row-${i}`;
+                      return (
+                        <li key={key}>
+                          <div className="bankr-panel__row">
+                            <span className="bankr-panel__name">{launchRowLabel(row)}</span>
+                            <a
+                              className="bankr-panel__row-ext"
+                              href={launchRowHref(row, address ?? "")}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open on Bankr"
+                            >
+                              ↗
+                            </a>
+                            <button
+                              type="button"
+                              className="bankr-panel__mint btn btn-ghost btn-sm"
+                              disabled={wrongNetwork}
+                              onClick={() => setEscrowWizardRow(row)}
+                            >
+                              Get receipt
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  !bankrLoading && !bankrErr && <p className="muted one-liner">No Bankr fee tokens for this wallet.</p>
+                )}
+              </section>
+
+              <details className="bfrr-primer bfrr-primer--profile">
+                <summary>What is a receipt?</summary>
+                <div className="bfrr-primer__body">
+                  <p>
+                    Only on-chain receipts can be sold here. If you earn fees on Bankr but do not see a token under <strong>Ready to list</strong>, use <strong>Get receipt</strong> or ask on{" "}
+                    <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>.
+                    {" "}
+                    <a href="https://docs.bankr.bot/token-launching/transferring-fees/" target="_blank" rel="noreferrer">Learn more</a>
+                  </p>
+                </div>
+              </details>
+            </>
+          )}
+        </>
+      )}
 
       {escrowWizardRow && address && (
         <EscrowWizard
@@ -1047,20 +1039,17 @@ export default function App() {
         />
       )}
 
-      {/* ── Settings ── */}
       {showSettings && (
         <SettingsSheet mpInput={mpInput} setMpInput={setMpInput}
           colInput={colInput} setColInput={setColInput}
           onClose={() => setShowSettings(false)} />
       )}
 
-      {/* ── Error bar ── */}
       {writeError && (
         <div className="error-bar">{writeError.message.slice(0, 120)}</div>
       )}
 
-      {/* WalletConnect hint when not configured */}
-      {!isConnected && !walletConnectConfigured && (
+      {!isConnected && !walletConnectConfigured && mainTab === "home" && (
         <p className="muted" style={{ textAlign: "center", marginTop: "2rem", fontSize: "0.78rem" }}>
           For mobile wallets add <span className="mono">VITE_REOWN_PROJECT_ID</span> from{" "}
           <a href="https://cloud.reown.com/" target="_blank" rel="noreferrer">Reown Cloud</a>.

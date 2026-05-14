@@ -146,6 +146,188 @@ a:hover { text-decoration: underline; }
   gap: 0.5rem;
 }
 
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.app-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  padding: 0.2rem;
+}
+
+.app-tab {
+  background: transparent;
+  border: none;
+  color: var(--muted-2);
+  font-family: var(--font);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.app-tab:hover:not(.app-tab--active) {
+  color: var(--text);
+}
+
+.app-tab--active {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border-hi);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-btn:hover { color: #fb923c; }
+
+.profile-tab-hint {
+  text-align: center;
+  margin: 1.5rem 0 2rem;
+  font-size: 0.85rem;
+}
+
+.profile-gate {
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 1.5rem 1.25rem;
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+.profile-gate p {
+  margin-bottom: 1rem;
+  color: var(--muted-2);
+  font-size: 0.92rem;
+}
+
+.profile-wallet-card {
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 1rem 1.15rem;
+  margin: 0.75rem 0 1.25rem;
+}
+
+.profile-wallet-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.profile-wallet-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.profile-wallet-card__status {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.profile-wallet-card__address {
+  font-size: 0.78rem;
+  word-break: break-all;
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+  color: var(--text);
+}
+
+.profile-wallet-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.profile-paste-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.profile-paste-row input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.profile-receipt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.profile-receipt-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 140px) 1fr;
+  grid-template-rows: auto auto;
+  gap: 0.65rem 1rem;
+  align-items: start;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+}
+
+.profile-receipt-row--open {
+  border-color: var(--accent-md);
+  background: var(--surface-2);
+}
+
+.profile-receipt-row .bfrr-card--static {
+  grid-row: 1 / span 2;
+  max-width: 140px;
+}
+
+.profile-receipt-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.profile-receipt-row__panel {
+  grid-column: 1 / -1;
+}
+
+.profile-receipt-row__panel .sell-panel {
+  margin-top: 0;
+}
+
+@media (max-width: 520px) {
+  .profile-receipt-row {
+    grid-template-columns: 1fr;
+  }
+  .profile-receipt-row .bfrr-card--static {
+    grid-row: auto;
+    max-width: 180px;
+  }
+}
+
 .wallet-pill {
   display: flex;
   align-items: center;
@@ -284,6 +466,13 @@ button { cursor: pointer; font-family: var(--font); }
 .bfrr-card:hover  { border-color: var(--border-hi); }
 .bfrr-card.active { border-color: var(--accent); background: var(--surface-2); }
 .bfrr-card:active { transform: scale(0.98); }
+
+.bfrr-card--static {
+  cursor: default;
+  max-width: 160px;
+}
+.bfrr-card--static:hover { border-color: var(--border); }
+.bfrr-card--static.active { border-color: var(--accent); }
 
 .bfrr-card__img {
   width: 100%;
@@ -647,6 +836,17 @@ input::placeholder { color: var(--muted); }
   max-width: 400px;
 }
 
+.hero--compact {
+  padding: 1rem 0 0.25rem;
+}
+.hero--compact h1 {
+  font-size: clamp(1.35rem, 4vw, 1.85rem);
+}
+.hero--compact p {
+  margin-top: 0.35rem;
+  max-width: none;
+}
+
 /* ── “Get a BFRR” explainer ── */
 .bfrr-primer {
   margin: 1.25rem 0 0.5rem;
@@ -672,6 +872,10 @@ input::placeholder { color: var(--muted); }
 
 .bfrr-primer__body p {
   margin: 0;
+}
+
+.bfrr-primer--profile {
+  margin-top: 1.25rem;
 }
 
 /* ── Bankr API panel ── */
@@ -708,6 +912,18 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 0.45rem;
+}
+
+.bankr-panel__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: inherit;
+  color: var(--accent);
+  padding: 0.4rem 0.65rem;
+  background: var(--accent-lo);
+  border: 1px solid var(--accent-md);
+  border-radius: var(--r-xs);
 }
 
 .bankr-panel__token {
