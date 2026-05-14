@@ -89,7 +89,7 @@ On-chain reality for **`FeeRightsFixedSale`**:
 - **Not for sale:** Seller **holds** BFRR in their wallet; no **active** listing for that `(collection, tokenId)` on the marketplace.  
 - **For sale:** Seller called **`list`** → BFRR is **held by the marketplace contract** until **`buy`** or **`cancel`**; then it goes to buyer or back to seller.
 
-There is **no** third “optional / in-between” listing state. **Update (Bankr `bankr-marketplace-v1` v1.62, May 2026):** Bankr shipped **split flows** — **mint receipt** (3 steps) vs **sell rights** (4 steps) — **required listing** with enforced price, and removed **“Optional”** / **“0 to skip”** labels. Re-run through **SELL** in-app and confirm custodial **`approve`** + **`list`** against pinned addresses still succeed after any vendor index lag.
+There is **no** third “optional / in-between” listing state. **Update (Bankr `bankr-marketplace-v1` v1.62, May 2026):** Bankr shipped **split flows** — **mint receipt** (3 steps) vs **sell rights** (4 steps) — **required listing** with enforced price, and removed **“Optional”** / **“0 to skip”** labels. **Follow-up (v1.62 / internal v144):** **`poolId`** passed as full **32-byte** hex to fix viem **bytes31 vs bytes32**; worker injects full tuple **`feeManager`, `poolId`, `token0`, `token1`** before **`prepareDeposit`** (incl. “test” launch); **List only** when wallet already holds BFRR — direct action under **MANAGE** tab (skips escrow + mint); sell flow uses **`approve(marketplace, tokenId)`**. Custodial scanner manual refresh for marketplace + BFRR: vendor index ETA was quoted **~5–10 minutes** after push — re-try custodial **`approve`** after that window.
 
 ## Observations
 
