@@ -53,6 +53,14 @@ Please remove "Optional" from the List step in Sell orchestration. Use two expli
 Do not use "0 ETH to skip listing" in the same flow as selling — that contradicts on-chain ZeroPrice.
 ```
 
+## Bankr worker — `poolId` length (viem bytes31 / bytes33)
+
+```text
+Job fails: viem "bytes33" (or bytes31) vs expected bytes32 — the poolId string must be exactly 0x + 64 hex characters (32 bytes). If the error shows 66 hex chars after 0x, something is still appending extra nibbles (e.g. "0000") or concatenating two values. Please log: (1) raw poolId from token-fees API, (2) string length after 0x, (3) value passed into encodeAbiParameters — all three must show 64. Remove any placeholder hex (e.g. abcdef...) in production jobs.
+
+Workaround for users who already hold BFRR: MANAGE → list for sale (skips PREPARE).
+```
+
 ## Buy a listed BFRR
 
 ```text
