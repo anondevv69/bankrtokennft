@@ -48,6 +48,43 @@ function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
+/** Normalize Bankr JSON into table rows (schema varies — adjust when Bankr documents theirs). */
+function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
+  const asArr = (v: unknown) => (Array.isArray(v) ? v : null);
+  const walk = (v: unknown): Record<string, unknown>[] | null => {
+    const direct = asArr(v);
+    if (direct) return direct as Record<string, unknown>[];
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    for (const key of ["launches", "results", "items", "data", "rows"]) {
+      if (key in o) {
+        const inner = walk(o[key]);
+        if (inner) return inner;
+      }
+    }
+    return null;
+  };
+  return walk(data)?.filter((x) => x && typeof x === "object") ?? [];
+}
+
+function launchRowLabel(row: Record<string, unknown>): string {
+  for (const k of ["name", "title", "symbol", "ticker", "slug", "id", "launchId"]) {
+    const v = row[k];
+    if (typeof v === "string" && v.trim()) return v;
+    if (typeof v === "number") return String(v);
+  }
+  return "Launch";
+}
+
+function launchRowHref(row: Record<string, unknown>, wallet: string): string {
+  const url = row.url ?? row.href ?? row.link;
+  if (typeof url === "string" && url.startsWith("http")) return url;
+  const id = row.id ?? row.launchId ?? row.slug;
+  if (typeof id === "string" && id.length > 0)
+    return `https://bankr.bot/launches/${encodeURIComponent(id)}`;
+  return `https://bankr.bot/launches/search?q=${encodeURIComponent(wallet)}`;
+}
+
 
 function parseNftImage(tokenUri: unknown): string | null {
   if (!tokenUri || typeof tokenUri !== "string") return null;
@@ -410,6 +447,9 @@ export default function App() {
   const [pasteId, setPasteId] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
+  const [bankrLoading, setBankrLoading] = useState(false);
+  const [bankrErr, setBankrErr] = useState<string | null>(null);
+  const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
 
   const marketplace = tryParseAddress(mpInput);
   const collection  = tryParseAddress(colInput);
@@ -475,6 +515,37 @@ export default function App() {
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
     try { await fn(); invalidate(); } catch { /* surfaced via writeError */ }
+  };
+
+  const loadBankrLaunches = async () => {
+    if (!address) return;
+    setBankrLoading(true);
+    setBankrErr(null);
+    setBankrRows([]);
+    try {
+      const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        hint?: string;
+        data?: unknown;
+      };
+      if (!json.ok) {
+        setBankrErr(
+          [json.error, json.hint].filter(Boolean).join(" — ") || `HTTP ${res.status}`,
+        );
+        return;
+      }
+      setBankrRows(extractBankrLaunchRows(json.data));
+    } catch (e) {
+      setBankrErr(
+        e instanceof Error
+          ? e.message
+          : "Could not reach /api/bankr-launches (deploy on Vercel with server env, or run `vercel dev`).",
+      );
+    } finally {
+      setBankrLoading(false);
+    }
   };
 
   return (
@@ -549,6 +620,45 @@ export default function App() {
           </p>
         </div>
       </details>
+
+      {/* ── Bankr launches (server proxy — optional) ── */}
+      {isConnected && address && !wrongNetwork && (
+        <section className="bankr-panel">
+          <div className="section-head">
+            <h2>Bankr launches</h2>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
+              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load from Bankr API"}
+            </button>
+          </div>
+          <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
+            Same idea as{" "}
+            <a href={`https://bankr.bot/launches/search?q=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">
+              bankr.bot launch search for your wallet
+            </a>
+            , but powered by a <strong>server-side</strong> Bankr API template so keys never ship in the browser. If
+            this button errors, set <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span> +{" "}
+            <span className="mono">BANKR_API_KEY</span> on Vercel (not <span className="mono">VITE_*</span>).
+          </p>
+          {bankrErr && <p className="err">{bankrErr}</p>}
+          {bankrRows.length > 0 && (
+            <ul className="bankr-panel__list">
+              {bankrRows.map((row, i) => (
+                <li key={i}>
+                  <a href={launchRowHref(row, address)} target="_blank" rel="noreferrer">
+                    {launchRowLabel(row)}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!bankrLoading && !bankrErr && bankrRows.length === 0 && (
+            <p className="muted" style={{ fontSize: "0.8rem" }}>
+              Tap <strong>Load from Bankr API</strong> after configuring the Vercel server env. Table columns depend on
+              Bankr’s JSON shape — we can map fields once they document the response.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ── Your BFRRs ── */}
       {isConnected && address && !wrongNetwork && collection && (

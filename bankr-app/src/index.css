@@ -610,3 +610,31 @@ input::placeholder { color: var(--muted); }
 .bfrr-primer__body p {
   margin: 0;
 }
+
+/* ── Bankr API panel ── */
+.bankr-panel {
+  margin: 1.5rem 0 0.5rem;
+}
+
+.bankr-panel__list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.bankr-panel__list li {
+  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+.bankr-panel__list li:last-child {
+  border-bottom: none;
+}
+
+.bankr-panel__list a {
+  font-weight: 600;
+}
