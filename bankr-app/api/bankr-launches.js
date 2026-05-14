@@ -1,21 +1,21 @@
 /**
- * Vercel / Node serverless — proxies Bankr token-launch APIs (secrets stay server-side).
+ * Vercel / Node serverless — proxies Bankr public read APIs (optional server key only).
  *
- * Docs (list launches — unauthenticated):
- *   https://docs.bankr.bot/token-launching/api-reference/list-token-launches/
+ * Default (no env): **Creator fees for wallet** — all Doppler + Clanker tokens where the address is a
+ * creator beneficiary (not limited to 50 recent deploys). Unauthenticated per Bankr docs:
+ *   https://docs.bankr.bot/token-launching/reading-fees/
  *
- * Env (Vercel / Railway **server** env — never `VITE_*`):
- *   BANKR_LAUNCHES_API_TEMPLATE — Optional. Defaults to:
+ * Optional env `BANKR_LAUNCHES_API_TEMPLATE` overrides the GET URL:
+ *   - Creator fees (default when unset):
+ *       https://api.bankr.bot/public/doppler/creator-fees/{address}?days=30
+ *     Use `{address}` for the connected wallet. Optional `BANKR_CREATOR_FEES_DAYS` (default 30, max 90 per docs).
+ *   - Recent launches list + server-side filter (feeRecipient / deployer):
  *       https://api.bankr.bot/token-launches
- *     Use another GET URL if needed; include `{address}` only if the upstream path needs it
- *     (e.g. Clanker). If the URL has no `{address}`, we still require query `q` to filter results for the wallet.
- *   BANKR_API_KEY — Optional. List endpoint is public; use for other upstreams that need auth.
- *   BANKR_AUTH_HEADER / BANKR_AUTH_SCHEME — Optional auth shape (see previous handler logic).
+ *     https://docs.bankr.bot/token-launching/api-reference/list-token-launches/
  *
  * Query: GET /api/bankr-launches?q=0x…Wallet
- * For https://api.bankr.bot/token-launches we fetch the global list then return only launches where
- * feeRecipient.walletAddress or deployer.walletAddress matches `q` (case-insensitive).
- * Limitation: only the **50 most recent** launches exist in that API — older launches won’t appear.
+ *
+ * Other reads from the same doc family (token-fees, claimable-fees) can be wired later as separate routes.
  */
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -40,8 +40,11 @@ export default async function handler(req, res) {
 
   const address = q.toLowerCase();
   const rawTemplate = (process.env.BANKR_LAUNCHES_API_TEMPLATE || "").trim();
-  const template =
-    rawTemplate || "https://api.bankr.bot/token-launches";
+  const daysRaw = (process.env.BANKR_CREATOR_FEES_DAYS || "30").trim();
+  const days = Math.min(90, Math.max(1, parseInt(daysRaw, 10) || 30));
+  const defaultCreator =
+    `https://api.bankr.bot/public/doppler/creator-fees/{address}?days=${days}`;
+  const template = rawTemplate || defaultCreator;
   const apiKey = (process.env.BANKR_API_KEY || "").trim();
 
   const upstreamUrl = template.includes("{address}")
@@ -94,15 +97,14 @@ export default async function handler(req, res) {
     return typeof a === "string" && a.toLowerCase() === address;
   };
 
-  const isBankrList =
-    typeof upstreamUrl === "string" &&
-    upstreamUrl.replace(/\/$/, "").endsWith("token-launches");
+  const urlNorm = typeof upstreamUrl === "string" ? upstreamUrl.replace(/\/$/, "") : "";
+  const isTokenLaunchesList = urlNorm.endsWith("token-launches");
 
   if (
     body &&
     typeof body === "object" &&
     Array.isArray(/** @type {{ launches?: unknown[] }} */ (body).launches) &&
-    (isBankrList || rawTemplate === "")
+    isTokenLaunchesList
   ) {
     const all = /** @type {{ launches: Record<string, unknown>[] }} */ (body).launches;
     const filtered = all.filter(
@@ -116,7 +118,21 @@ export default async function handler(req, res) {
         totalFromApi: all.length,
         matchedForWallet: address,
         note:
-          "Subset where feeRecipient or deployer equals q. Bankr list API returns at most 50 recent launches — older tokens are not included.",
+          "Subset where feeRecipient or deployer equals q. List API returns at most 50 recent launches.",
+      },
+    };
+  } else if (
+    body &&
+    typeof body === "object" &&
+    Array.isArray(/** @type {{ tokens?: unknown[] }} */ (body).tokens) &&
+    urlNorm.includes("/creator-fees/")
+  ) {
+    body = {
+      ...body,
+      __meta: {
+        source: upstreamUrl,
+        note:
+          "From GET /public/doppler/creator-fees/{address} — tokens where this wallet is a creator beneficiary. See Reading Creator Fees docs.",
       },
     };
   }

@@ -48,7 +48,7 @@ function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
-/** Normalize Bankr JSON into table rows (schema varies — adjust when Bankr documents theirs). */
+/** Normalize Bankr JSON into table rows (launches[] or creator-fees tokens[]). */
 function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
   const asArr = (v: unknown) => (Array.isArray(v) ? v : null);
   const walk = (v: unknown): Record<string, unknown>[] | null => {
@@ -56,7 +56,7 @@ function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
     if (direct) return direct as Record<string, unknown>[];
     if (!v || typeof v !== "object") return null;
     const o = v as Record<string, unknown>;
-    for (const key of ["launches", "results", "items", "data", "rows"]) {
+    for (const key of ["tokens", "launches", "results", "items", "data", "rows"]) {
       if (key in o) {
         const inner = walk(o[key]);
         if (inner) return inner;
@@ -68,17 +68,22 @@ function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
 }
 
 function launchRowLabel(row: Record<string, unknown>): string {
-  for (const k of ["name", "title", "symbol", "ticker", "slug", "id", "launchId"]) {
+  for (const k of ["tokenSymbol", "symbol", "name", "title", "ticker", "slug", "id", "launchId"]) {
     const v = row[k];
     if (typeof v === "string" && v.trim()) return v;
     if (typeof v === "number") return String(v);
   }
-  return "Launch";
+  const ta = row.tokenAddress;
+  if (typeof ta === "string" && ta.length > 10) return `${ta.slice(0, 6)}…${ta.slice(-4)}`;
+  return "Token";
 }
 
 function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   const url = row.url ?? row.href ?? row.link;
   if (typeof url === "string" && url.startsWith("http")) return url;
+  const ta = row.tokenAddress;
+  if (typeof ta === "string" && ta.startsWith("0x"))
+    return `https://bankr.bot/launches/search?q=${encodeURIComponent(ta)}`;
   const id = row.id ?? row.launchId ?? row.slug;
   if (typeof id === "string" && id.length > 0)
     return `https://bankr.bot/launches/${encodeURIComponent(id)}`;
@@ -621,24 +626,25 @@ export default function App() {
         </div>
       </details>
 
-      {/* ── Bankr launches (server proxy — optional) ── */}
+      {/* ── Bankr creator fees (server proxy — optional) ── */}
       {isConnected && address && !wrongNetwork && (
         <section className="bankr-panel">
           <div className="section-head">
-            <h2>Bankr launches</h2>
+            <h2>Your Bankr tokens (fees)</h2>
             <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load Bankr launches"}
+              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load from Bankr API"}
             </button>
           </div>
           <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
-            Same idea as{" "}
-            <a href={`https://bankr.bot/launches/search?q=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">
-              bankr.bot launch search for your wallet
-            </a>
-            , but powered by a <strong>server-side</strong> URL template (see Vercel env{" "}
-            <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span>
-            ). Use the exact URL from Bankr or Clanker docs; <span className="mono">BANKR_API_KEY</span> is optional if
-            the endpoint is public. Never use <span className="mono">VITE_*</span> for secrets.
+            Default upstream is Bankr’s public{" "}
+            <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">
+              creator-fees
+            </a>{" "}
+            endpoint (all tokens where you’re a creator beneficiary — not capped at 50 recent launches). Override with
+            Vercel env <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span> (e.g.{" "}
+            <span className="mono">https://api.bankr.bot/token-launches</span> for the recent list only).{" "}
+            <span className="mono">BANKR_API_KEY</span> is optional for public reads. Never use{" "}
+            <span className="mono">VITE_*</span> for secrets.
           </p>
           {bankrErr && <p className="err">{bankrErr}</p>}
           {bankrRows.length > 0 && (
@@ -654,8 +660,9 @@ export default function App() {
           )}
           {!bankrLoading && !bankrErr && bankrRows.length === 0 && (
             <p className="muted" style={{ fontSize: "0.8rem" }}>
-              Tap <strong>Load from Bankr API</strong> after configuring the Vercel server env. Table columns depend on
-              Bankr’s JSON shape — we can map fields once they document the response.
+              Tap <strong>Load from Bankr API</strong> (needs <span className="mono">/api/bankr-launches</span> on
+              Vercel or <span className="mono">vercel dev</span>). Each row links to Bankr search for that token
+              address when available.
             </p>
           )}
         </section>
