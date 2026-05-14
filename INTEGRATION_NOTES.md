@@ -72,6 +72,16 @@ Track real Base Sepolia / Bankr behavior here. Do not record private keys, seed 
 - Local escrow state cleared:
 - Notes:
 
+## Bankr Marketplace — custodial wallet vs external wallet (mainnet)
+
+**Bankr-embedded / custodial wallet (e.g. in-app `0x374d…`):** Bankr’s **security scanner** may block **`approve` / `setApprovalForAll`** on **`FeeRightsFixedSale`** (`0xA816…`) until a **third-party risk index** ingests **BaseScan +/or Sourcify** verification — even when the contract is already **verified on BaseScan**. Escalate false positives with Bankr support if the block lasts **>24h** after public verification.
+
+**External wallet (MetaMask / Rabby / WalletConnect):** txs are signed by the **user’s** wallet client — **no** Bankr custodial scanner on those **`approve`/`list`** calls. Recommended **MVP escape hatch** when custodial signing is blocked: Bankr broadcasts **`safeTransferFrom(BFRR, bankrWallet → userEOA, tokenId)`** (often allowed), then the user **`approve` + `list`** from the EOA with **gas**.
+
+**BFRR `tokenId`:** always **`uint256 = escrow.tokenIdFor(feeManager, poolId)`** — not raw `poolId` as `ownerOf` input. **`BankrFeeRightsReceipt`** is **not** `ERC721Enumerable` — no `tokenOfOwnerByIndex` on-chain.
+
+**`isEscrowed(poolId)` on escrow** and **`ownerOf(tokenId)` on BFRR** answer **different** questions — both can be “active” after finalize (seller holds receipt NFT; escrow holds the fee-rights position for the pool).
+
 ## Observations
 
 - Ownership propagation:

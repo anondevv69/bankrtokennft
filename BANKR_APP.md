@@ -29,6 +29,17 @@ install the skill at https://github.com/anondevv69/bankrtokennft/tree/main/fee-r
 
 Source: **`skills/bankr-fee-rights/SKILL.md`** and **`skills/bankr-fee-rights/references/dm-intents.md`** (copy-paste blocks for DMs). The mini-app still owns **orchestrated** sell flows; the skill guides **structured** agent prompts and troubleshooting. Re-run the install line above after skill updates so Bankr refreshes the skill.
 
+## Wallet signers (Bankr vs external)
+
+**Bankr Marketplace (mini-app):** Prefer **two modes** so sellers are not blocked when a custodial **security scanner** lags behind **BaseScan verification**:
+
+1. **Bankr account / embedded wallet** — smooth onboarding; signing may be gated by Bankr’s risk engine for **`approve`** to new marketplace deployments.  
+2. **External wallet (WalletConnect / MetaMask / Rabby)** — user signs **`approve` + `list`** directly; no custodial scanner on those txs (still only offer **canonical** `FeeRightsFixedSale` + verified BFRR addresses).
+
+**Orchestration:** always **`approve` (or `setApprovalForAll`) → `list`**; never **`list`** alone. Use **full** BFRR **`tokenId`** = `escrow.tokenIdFor(feeManager, poolId)` in calldata — do not truncate.
+
+Details and escalation: **`INTEGRATION_NOTES.md`**, **`LAUNCH_CHECKLIST.md`** (verification + section 5, Bankr Marketplace).
+
 ## Standalone web
 
 For browser-wallet-only demos and Railway: **`bankr-app/README.md`**.

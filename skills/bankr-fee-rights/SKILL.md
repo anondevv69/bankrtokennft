@@ -2,7 +2,7 @@
 name: bankr-fee-rights
 description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 4
+version: 5
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -74,6 +74,14 @@ Never tell the user **“success”** until the matching tx **mined** and reads 
 | “Move beneficiary to escrow **before** prepare so shares exist” | **Inverted order** — see section above. |
 | “`getShares` reverted ⇒ user has no position” | **Revert ⇒ wrong target / ABI**, until proven otherwise. Off-chain **token-fees** may still show **share %** for the user. |
 | **`balanceOf`** on fee manager for shares | Use **`getShares(poolId, address)`** per **`IBankrFees`**. |
+| “User can **`approve`** marketplace as soon as BaseScan verifies” | **Bankr-custodial** wallets may still block until a **third-party scanner index** updates — sometimes **24h+**; offer **WalletConnect / MetaMask** or **`safeTransferFrom`** BFRR to user EOA. See **`INTEGRATION_NOTES.md`**. |
+
+---
+
+## Custodial scanner vs listing (Bankr marketplace)
+
+- **`list`** on **`FeeRightsFixedSale`** requires prior **`approve`/`setApprovalForAll`** on **BFRR** for the marketplace address — **two** txs (or a deliberate multicall), not one magic **`list`**.  
+- If **`approve`** is blocked with **`unverified_contract`** despite **BaseScan** verification: **Sourcify** + **wait**; **escalate** with Bankr if **>24h**; recommend **external wallet login** or **NFT transfer to user EOA** for **`approve` + `list`**.
 
 ---
 

@@ -54,6 +54,16 @@ Trust: users should see verified source on [basescan.org](https://basescan.org) 
 
 Use `forge verify-contract` with **`--chain 8453`** and your `ETHERSCAN_API_KEY` (same key flow as Sepolia; chain id differs). Fill in real addresses in **`VERIFICATION.md`** under **Base mainnet (production)** once deployed.
 
+**Also verify `BankrFeeRightsReceipt`** (constructor `escrow_` = deployed **`BankrEscrowV3`**) — not only **`FeeRightsFixedSale`**. Explorers + some custodial scanners treat **both** `to` addresses in an `approve` path.
+
+### Custodial signing lag (Bankr marketplace)
+
+If sellers use a **Bankr-custodied** wallet, **`approve` / `setApprovalForAll`** to your **canonical** `FeeRightsFixedSale` may be **blocked** (`unverified_contract`) until a **vendor index** catches up — sometimes **minutes**, sometimes **24h+** after BaseScan shows verified. Mitigations:
+
+1. **`forge verify-contract … --verifier sourcify`** (optional) for vendors that read Sourcify first.  
+2. Ask Bankr for **WalletConnect / MetaMask** (or **NFT transfer to user EOA**) so **`approve` + `list`** are not gated by the custodial scanner.  
+3. **`INTEGRATION_NOTES.md`** — log false-positive tickets and ETAs.
+
 ---
 
 ## 3. Configure **Railway** (frontend only)
@@ -114,6 +124,7 @@ Update the **Bankr Marketplace app** (seller wizard / `bankr-marketplace-v1`, no
 4. **Resolve metadata** as needed: e.g. `GET /public/doppler/token-fees/:tokenAddress` for pool / initializer per [Bankr docs](https://docs.bankr.bot/token-launching/transferring-fees).
 5. **Gate the wizard:** only advance after **successful** beneficiary transfer (API success or mined tx), then **`finalizeDeposit`** when on-chain reads show escrow shares.
 6. **“Sell + list” orchestration:** If the unified flow includes **`list`**, require a **positive** listing price in ETH before start (`FeeRightsFixedSale` reverts **`ZeroPrice`** for `priceWei == 0`). Do **not** advertise “0 to skip” for that flow; use a separate **“wrap only”** (no list) path if users only want a BFRR without listing.
+7. **Dual sign-in (recommended):** **Bankr account** (embedded wallet) **or** **Connect with WalletConnect / MetaMask** for the same listing flows. Custodial scanners must not be the **only** path for **`approve` → `list`** on a verified canonical marketplace. If custodial **`approve`** is blocked, offer **`safeTransferFrom`** BFRR to the user’s connected EOA, then continue **`approve` + `list`** from that wallet.
 
 Reference: [Transferring fees to a new wallet](https://docs.bankr.bot/token-launching/transferring-fees).
 
