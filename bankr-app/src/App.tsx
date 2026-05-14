@@ -90,6 +90,11 @@ function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   return `https://bankr.bot/launches/search?q=${encodeURIComponent(wallet)}`;
 }
 
+/** Bankr docs — launching, escrow, receipts (flows not duplicated in this marketplace UI). */
+function bankrTokenLaunchingDocsHref() {
+  return "https://docs.bankr.bot/token-launching/";
+}
+
 function normPoolIdHex(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw.startsWith("0x")) return null;
   const h = raw.toLowerCase();
@@ -440,7 +445,37 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   );
 }
 
-// ── Settings sheet ───────────────────────────────────────────────────────────
+function MintEscrowCallout({ cta, onDismiss }: {
+  cta: { label: string; href: string };
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="escrow-callout">
+      <div className="escrow-callout__head">
+        <span className="escrow-callout__title">{cta.label}</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>Dismiss</button>
+      </div>
+      <p className="escrow-callout__blurb">
+        This page only <strong>sells BFRR NFTs</strong> you already hold. Minting one is a separate{" "}
+        <strong>escrow</strong> flow on Base via{" "}
+        <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
+          BankrEscrowV3
+        </a>{" "}
+        (prepare → move fee beneficiary → finalize). That wizard lives on{" "}
+        <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>{" "}
+        today — it is not built into this marketplace yet.
+      </p>
+      <div className="escrow-callout__actions">
+        <a className="btn btn-ghost btn-sm" href={cta.href} target="_blank" rel="noreferrer">
+          Open Bankr — deposit &amp; mint BFRR
+        </a>
+        <a className="btn btn-ghost btn-sm" href={bankrTokenLaunchingDocsHref()} target="_blank" rel="noreferrer">
+          Token launching docs
+        </a>
+      </div>
+    </div>
+  );
+}
 
 function SettingsSheet({ mpInput, setMpInput, colInput, setColInput, onClose }: {
   mpInput: string; setMpInput: (v: string) => void;
@@ -498,6 +533,8 @@ export default function App() {
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
   const [bankrRowBusy, setBankrRowBusy] = useState(false);
   const [bankrClickMsg, setBankrClickMsg] = useState<string | null>(null);
+  /** Shown after clicking a Bankr row when this wallet has no BFRR yet — deep-link to Bankr’s mint/deposit flow. */
+  const [bankrMintCta, setBankrMintCta] = useState<{ label: string; href: string } | null>(null);
   const bfrrSectionRef = useRef<HTMLElement | null>(null);
 
   const marketplace = tryParseAddress(mpInput);
@@ -515,6 +552,10 @@ export default function App() {
     const set = new Set([...scannedIds, ...manualIds]);
     return [...set].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
   }, [scannedIds, manualIds]);
+
+  useEffect(() => {
+    if (allTokenIds.length > 0) setBankrMintCta(null);
+  }, [allTokenIds.length]);
 
   // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
   useEffect(() => {
@@ -571,6 +612,7 @@ export default function App() {
     setBankrLoading(true);
     setBankrErr(null);
     setBankrClickMsg(null);
+    setBankrMintCta(null);
     try {
       const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
       const json = (await res.json()) as {
@@ -599,6 +641,7 @@ export default function App() {
 
   useEffect(() => {
     setBankrClickMsg(null);
+    setBankrMintCta(null);
     if (!address) {
       setBankrRows([]);
       setBankrErr(null);
@@ -626,29 +669,37 @@ export default function App() {
       setBankrClickMsg("Wallet RPC not ready — try again in a moment.");
       return;
     }
-    if (!collection) {
-      setBankrClickMsg("Set the BFRR contract address in ⚙ settings first, then click again.");
-      return;
-    }
+
     if (allTokenIds.length === 0) {
-      setBankrClickMsg(
-        "No BFRR token IDs in this wallet yet. Complete Bankr’s escrow → receipt flow so a BFRR mints here, " +
-          "or paste your BFRR token ID in the field below, then click this token again.",
-      );
-      scrollToBfrr();
+      setBankrMintCta({
+        label: launchRowLabel(row),
+        href: launchRowHref(row, address ?? ""),
+      });
+      if (collection) scrollToBfrr();
       return;
     }
+
+    if (!collection) {
+      setBankrClickMsg("Set the BFRR contract address in ⚙ settings to match this token to a receipt.");
+      return;
+    }
+
     setBankrRowBusy(true);
     try {
       const matched = await findBfrrTokenIdForBankrRow(publicClient, collection, allTokenIds, row);
       if (matched) {
+        setBankrMintCta(null);
         setSelectedId(matched);
         setBankrClickMsg(null);
         scrollToBfrr();
       } else {
+        setBankrMintCta({
+          label: launchRowLabel(row),
+          href: launchRowHref(row, address ?? ""),
+        });
         setBankrClickMsg(
-          "None of your BFRRs on file match this launch (pool / token pair). If you hold a BFRR for it, " +
-            "paste its token ID below and click Add, then try this row again.",
+          "No BFRR on file matches that pool. Paste the BFRR token ID below, Add, then click the token again — " +
+            "or mint via Bankr first.",
         );
         scrollToBfrr();
       }
@@ -738,7 +789,8 @@ export default function App() {
             </button>
           </div>
           <div className="muted one-liner">
-            Loaded automatically from Bankr. Click a name to match a BFRR you hold;{" "}
+            From Bankr’s API. Click a token: if you already have a BFRR it opens sell; if not, we link you to Bankr to mint one first.
+            {" "}
             <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">docs</a>
             {" · "}
             <details className="inline-details">
@@ -750,6 +802,9 @@ export default function App() {
           </div>
           {bankrErr && <p className="err">{bankrErr}</p>}
           {bankrClickMsg && <p className="muted bankr-panel__hint">{bankrClickMsg}</p>}
+          {bankrMintCta && !collection && (
+            <MintEscrowCallout cta={bankrMintCta} onDismiss={() => setBankrMintCta(null)} />
+          )}
           {bankrRows.length > 0 && (
             <ul className="bankr-panel__list">
               {bankrRows.map((row, i) => {
@@ -769,7 +824,7 @@ export default function App() {
                         className="bankr-panel__token"
                         disabled={bankrRowBusy || wrongNetwork}
                         onClick={() => void onBankrTokenClick(row)}
-                        title="Try to select matching BFRR and open sell flow"
+                        title="Match BFRR to sell, or open Bankr to mint one first"
                       >
                         {launchRowLabel(row)}
                       </button>
@@ -805,12 +860,16 @@ export default function App() {
           </div>
 
           <p className="muted one-liner">
-            BFRRs you hold on Base (escrow → receipt). Not on Bankr as fee recipient alone.{" "}
+            BFRRs you hold on Base. Not the same as Bankr fee-recipient until escrow mints the receipt.{" "}
             <a href={`https://basescan.org/token/${collection}?a=${address ?? ""}`} target="_blank" rel="noreferrer">
               BaseScan inventory
             </a>
-            {" — "}wrong contract in ⚙ or old transfers: paste token ID below.
+            {" — "}paste token ID if the scan missed it.
           </p>
+
+          {bankrMintCta && (
+            <MintEscrowCallout cta={bankrMintCta} onDismiss={() => setBankrMintCta(null)} />
+          )}
 
           {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
