@@ -744,6 +744,8 @@ input::placeholder { color: var(--muted); }
   text-decoration: none !important;
 }
 
-.bankr-panel__row-ext:hover {
-  background: var(--surface-2);
+.bankr-panel__mint {
+  flex-shrink: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
 }

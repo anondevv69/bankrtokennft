@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_REOWN_PROJECT_ID?: string;
   /** Optional — `getLogs` depth when scanning Transfer events to find token IDs (max 500000). */
   readonly VITE_RECEIPT_SCAN_BLOCKS?: string;
+  /** Optional — `BankrEscrowV3` for in-app escrow wizard (defaults to project deploy). */
+  readonly VITE_ESCROW_ADDRESS?: string;
 }
 
 interface ImportMeta {

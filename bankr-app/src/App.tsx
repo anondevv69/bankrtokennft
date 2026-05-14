@@ -23,10 +23,10 @@ import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
 import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
+import { EscrowWizard } from "./EscrowWizard";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const ESCROW_ADDRESS: Address = "0x9CFD0AF884791b7c4BCC77f987bf0fa89b2064cB";
 const GETLOGS_MAX_BLOCK_SPAN = 10_000n;
 const MAX_LISTING_IDS_TO_SCAN = 250n;
 const DEFAULT_SCAN_BLOCKS = 80_000n;
@@ -43,6 +43,19 @@ function envAddr(name: string): string {
   const raw = (import.meta as ImportMeta).env[name];
   return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
 }
+
+const ESCROW_DEFAULT: Address = "0x9CFD0AF884791b7c4BCC77f987bf0fa89b2064cB";
+
+function escrowAddressFromEnv(): Address {
+  const raw = (import.meta as ImportMeta).env.VITE_ESCROW_ADDRESS;
+  if (typeof raw === "string") {
+    const a = tryParseAddress(raw.trim());
+    if (a) return a;
+  }
+  return ESCROW_DEFAULT;
+}
+
+const ESCROW_ADDRESS: Address = escrowAddressFromEnv();
 
 function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -445,9 +458,10 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   );
 }
 
-function MintEscrowCallout({ cta, onDismiss }: {
-  cta: { label: string; href: string };
+function MintEscrowCallout({ cta, onDismiss, onMintHere }: {
+  cta: { label: string; href: string; row: Record<string, unknown> };
   onDismiss: () => void;
+  onMintHere: () => void;
 }) {
   return (
     <div className="escrow-callout">
@@ -456,18 +470,20 @@ function MintEscrowCallout({ cta, onDismiss }: {
         <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>Dismiss</button>
       </div>
       <p className="escrow-callout__blurb">
-        This page only <strong>sells BFRR NFTs</strong> you already hold. Minting one is a separate{" "}
-        <strong>escrow</strong> flow on Base via{" "}
+        This marketplace lists BFRRs after mint. You can <strong>mint here</strong> (three wallet steps on{" "}
         <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
           BankrEscrowV3
-        </a>{" "}
-        (prepare → move fee beneficiary → finalize). That wizard lives on{" "}
-        <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>{" "}
-        today — it is not built into this marketplace yet.
+        </a>
+        ) or continue on{" "}
+        <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>
+        . Non‑WETH pools may need a future override for token0/token1.
       </p>
       <div className="escrow-callout__actions">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onMintHere}>
+          Mint BFRR here (escrow)
+        </button>
         <a className="btn btn-ghost btn-sm" href={cta.href} target="_blank" rel="noreferrer">
-          Open Bankr — deposit &amp; mint BFRR
+          Open Bankr
         </a>
         <a className="btn btn-ghost btn-sm" href={bankrTokenLaunchingDocsHref()} target="_blank" rel="noreferrer">
           Token launching docs
@@ -533,8 +549,14 @@ export default function App() {
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
   const [bankrRowBusy, setBankrRowBusy] = useState(false);
   const [bankrClickMsg, setBankrClickMsg] = useState<string | null>(null);
-  /** Shown after clicking a Bankr row when this wallet has no BFRR yet — deep-link to Bankr’s mint/deposit flow. */
-  const [bankrMintCta, setBankrMintCta] = useState<{ label: string; href: string } | null>(null);
+  /** Shown after clicking a Bankr row when this wallet has no BFRR yet — Bankr link + optional in-app escrow. */
+  const [bankrMintCta, setBankrMintCta] = useState<{
+    label: string;
+    href: string;
+    row: Record<string, unknown>;
+  } | null>(null);
+  const [escrowWizardRow, setEscrowWizardRow] = useState<Record<string, unknown> | null>(null);
+  const [scanEpoch, setScanEpoch] = useState(0);
   const bfrrSectionRef = useRef<HTMLElement | null>(null);
 
   const marketplace = tryParseAddress(mpInput);
@@ -584,7 +606,7 @@ export default function App() {
       } finally { setScanning(false); }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address, collection?.toLowerCase(), wrongNetwork]);
+  }, [isConnected, address, collection?.toLowerCase(), wrongNetwork, scanEpoch]);
 
   // Listings
   const { data: nextListingId } = useReadContract({
@@ -674,6 +696,7 @@ export default function App() {
       setBankrMintCta({
         label: launchRowLabel(row),
         href: launchRowHref(row, address ?? ""),
+        row,
       });
       if (collection) scrollToBfrr();
       return;
@@ -696,6 +719,7 @@ export default function App() {
         setBankrMintCta({
           label: launchRowLabel(row),
           href: launchRowHref(row, address ?? ""),
+          row,
         });
         setBankrClickMsg(
           "No BFRR on file matches that pool. Paste the BFRR token ID below, Add, then click the token again — " +
@@ -789,13 +813,13 @@ export default function App() {
             </button>
           </div>
           <div className="muted one-liner">
-            From Bankr’s API. Click a token: if you already have a BFRR it opens sell; if not, we link you to Bankr to mint one first.
+            From Bankr’s API. Click a name to match a BFRR or show mint options; use <strong>Mint</strong> for the in-app escrow wizard.
             {" "}
             <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">docs</a>
             {" · "}
             <details className="inline-details">
               <summary>Deploy / env</summary>
-              <span className="mono">/api/bankr-launches</span> on Vercel. Optional{" "}
+              <span className="mono">/api/bankr-launches</span>, <span className="mono">/api/bankr-build-transfer</span> on Vercel. Optional{" "}
               <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span>,{" "}
               <span className="mono">BANKR_CREATOR_FEES_DAYS</span>.
             </details>
@@ -803,7 +827,14 @@ export default function App() {
           {bankrErr && <p className="err">{bankrErr}</p>}
           {bankrClickMsg && <p className="muted bankr-panel__hint">{bankrClickMsg}</p>}
           {bankrMintCta && !collection && (
-            <MintEscrowCallout cta={bankrMintCta} onDismiss={() => setBankrMintCta(null)} />
+            <MintEscrowCallout
+              cta={bankrMintCta}
+              onDismiss={() => setBankrMintCta(null)}
+              onMintHere={() => {
+                setEscrowWizardRow(bankrMintCta.row);
+                setBankrMintCta(null);
+              }}
+            />
           )}
           {bankrRows.length > 0 && (
             <ul className="bankr-panel__list">
@@ -837,6 +868,18 @@ export default function App() {
                       >
                         ↗
                       </a>
+                      <button
+                        type="button"
+                        className="bankr-panel__mint btn btn-ghost btn-sm"
+                        disabled={bankrRowBusy || wrongNetwork}
+                        title="Mint BFRR via escrow on this site"
+                        onClick={() => {
+                          setBankrClickMsg(null);
+                          setEscrowWizardRow(row);
+                        }}
+                      >
+                        Mint
+                      </button>
                     </div>
                   </li>
                 );
@@ -868,7 +911,14 @@ export default function App() {
           </p>
 
           {bankrMintCta && (
-            <MintEscrowCallout cta={bankrMintCta} onDismiss={() => setBankrMintCta(null)} />
+            <MintEscrowCallout
+              cta={bankrMintCta}
+              onDismiss={() => setBankrMintCta(null)}
+              onMintHere={() => {
+                setEscrowWizardRow(bankrMintCta.row);
+                setBankrMintCta(null);
+              }}
+            />
           )}
 
           {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
@@ -983,6 +1033,19 @@ export default function App() {
           ))}
         </div>
       </section>
+
+      {escrowWizardRow && address && (
+        <EscrowWizard
+          row={escrowWizardRow}
+          escrowAddress={ESCROW_ADDRESS}
+          userAddress={address}
+          onClose={() => setEscrowWizardRow(null)}
+          onDone={() => {
+            setScanEpoch((e) => e + 1);
+            void loadBankrLaunches();
+          }}
+        />
+      )}
 
       {/* ── Settings ── */}
       {showSettings && (
