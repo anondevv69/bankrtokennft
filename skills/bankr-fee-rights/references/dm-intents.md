@@ -24,7 +24,18 @@ If yes, list price ETH: <number>   # must be > 0 if listing
 3. Confirm **`allowedFeeManager(feeManager)`** on escrow is **true** (else owner calls `setFeeManagerAllowed` once per manager).  
 4. **`eth_call`** `getShares(poolId, seller)` on **that** `feeManager` — must **return a uint** (not revert). **`Revert ≠ “no shares”`** (wrong contract). **`0`** ⇒ `CallerDoesNotOwnRights` if they `prepare` anyway.  
 5. Guide **`prepareDeposit` → beneficiary to escrow → finalize`** in that order (see main `SKILL.md`).  
-6. If listing: **`setApprovalForAll`** then **`list`** with **`priceWei > 0`**.
+6. If listing: **`approve(marketplace, tokenId)`** (preferred) or **`setApprovalForAll(marketplace, true)`**, then **`list`** with **`priceWei > 0`**.
+
+## Quick list only (BFRR already in wallet — ask Bankr product)
+
+Paste to Bankr / marketplace team:
+
+```text
+When the seller already holds BFRR (finalize done), add a "List only" path on SELL:
+- Collect list price in ETH (> 0).
+- Call approve(FeeRightsFixedSale, tokenId) then list(...) — skip prepareDeposit, beneficiary, and mint in the wizard.
+- Keep the full orchestration for users who have not finalized yet.
+```
 
 ## Buy a listed BFRR
 

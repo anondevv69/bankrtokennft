@@ -2,7 +2,7 @@
 name: bankr-fee-rights
 description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 5
+version: 6
 metadata:
   clawdbot:
     emoji: "🧾"

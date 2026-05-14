@@ -74,6 +74,10 @@ function envAddr(name: string): string {
   return "";
 }
 
+function hasPinnedContractsFromEnv(): boolean {
+  return Boolean(envAddr("VITE_MARKETPLACE_ADDRESS") && envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
+}
+
 export default function App() {
   const queryClient = useQueryClient();
   const { address, isConnected } = useAccount();
@@ -243,6 +247,24 @@ export default function App() {
         scan recent transfers below.
       </p>
 
+      <div className="panel quick-path-callout">
+        <h2>Already minted BFRR? Skip the Bankr wizard</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          In Bankr Marketplace <strong>v1.62</strong>, <em>Sell Rights + List</em> still runs the full escrow → beneficiary →
+          mint → list orchestration — that UI is <strong>not in this repo</strong>, so we cannot change that modal from
+          GitHub. Ask Bankr for a <strong>&quot;List only&quot;</strong> shortcut when the wallet already holds BFRR (copy in{" "}
+          <code className="mono">skills/.../dm-intents.md</code> and <code className="mono">LAUNCH_CHECKLIST.md</code> item
+          7). On <strong>this page</strong>: enter <strong>token ID</strong> + <strong>list price (ETH)</strong> in the first
+          panel, then <strong>Approve</strong> → <strong>List</strong> below — no escrow steps.
+        </p>
+      </div>
+
+      {hasPinnedContractsFromEnv() && (
+        <p className="muted" style={{ marginTop: "-0.5rem", fontSize: "0.85rem" }}>
+          Railway build has <code className="mono">VITE_*</code> addresses — marketplace + BFRR fields are prefilled.
+        </p>
+      )}
+
       <div className="panel">
         <h2>Wallet</h2>
         {!isConnected ? (
@@ -300,9 +322,10 @@ export default function App() {
 
       <>
         <div className="panel">
-          <h2>Which token</h2>
+          <h2>List a receipt — token, price, then on-chain steps</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            Fields stay editable even on the wrong network so you can paste addresses, then switch to Base to sign.
+            Enter <strong>token ID</strong> and <strong>list price</strong> first (same flow as &quot;amount then
+            sale&quot;). Contract addresses stay editable; switch wallet to Base before signing.
           </p>
           <label htmlFor="mp">Marketplace contract</label>
             <input
@@ -324,6 +347,13 @@ export default function App() {
               placeholder="Full uint256 from escrow.tokenIdFor(…)"
               value={tokenIdStr}
               onChange={(e) => setTokenIdStr(e.target.value)}
+            />
+            <label htmlFor="lp">Your list price (ETH)</label>
+            <input
+              id="lp"
+              placeholder="e.g. 0.0005"
+              value={listPriceEth}
+              onChange={(e) => setListPriceEth(e.target.value)}
             />
             {collectionOk && isConnected && address && (
               <div className="readout" style={{ marginBottom: "0.85rem" }}>
@@ -444,10 +474,6 @@ export default function App() {
             >
               Optional — Approve marketplace for all tokens in this collection
             </button>
-            <label htmlFor="lp" style={{ marginTop: "1rem" }}>
-              Your sale price (ETH)
-            </label>
-            <input id="lp" value={listPriceEth} onChange={(e) => setListPriceEth(e.target.value)} />
             <button
               type="button"
               className="primary"
