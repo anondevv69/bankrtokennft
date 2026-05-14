@@ -47,6 +47,33 @@ body {
 /* ── Utilities ── */
 .mono { font-family: var(--mono); font-size: 0.82em; }
 .muted { color: var(--muted-2); font-size: 0.85rem; }
+
+.one-liner {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: -0.25rem 0 0.65rem;
+  color: var(--muted-2);
+}
+
+.inline-details {
+  display: inline;
+}
+
+.inline-details > summary {
+  display: inline;
+  list-style: none;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.inline-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.inline-details[open] > summary {
+  margin-right: 0.25rem;
+}
 .err { color: var(--danger); font-size: 0.82rem; margin-top: 0.4rem; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }

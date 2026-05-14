@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -566,11 +566,10 @@ export default function App() {
     try { await fn(); invalidate(); } catch { /* surfaced via writeError */ }
   };
 
-  const loadBankrLaunches = async () => {
+  const loadBankrLaunches = useCallback(async () => {
     if (!address) return;
     setBankrLoading(true);
     setBankrErr(null);
-    setBankrRows([]);
     setBankrClickMsg(null);
     try {
       const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
@@ -591,12 +590,29 @@ export default function App() {
       setBankrErr(
         e instanceof Error
           ? e.message
-          : "Could not reach /api/bankr-launches (deploy on Vercel with server env, or run `vercel dev`).",
+          : "Could not reach /api/bankr-launches (deploy on Vercel or run vercel dev).",
       );
     } finally {
       setBankrLoading(false);
     }
-  };
+  }, [address]);
+
+  useEffect(() => {
+    setBankrClickMsg(null);
+    if (!address) {
+      setBankrRows([]);
+      setBankrErr(null);
+      setBankrLoading(false);
+      return;
+    }
+    setBankrRows([]);
+    setBankrErr(null);
+  }, [address]);
+
+  useEffect(() => {
+    if (!isConnected || !address || wrongNetwork) return;
+    void loadBankrLaunches();
+  }, [isConnected, address, wrongNetwork, loadBankrLaunches]);
 
   const scrollToBfrr = () => {
     requestAnimationFrame(() => {
@@ -697,21 +713,17 @@ export default function App() {
       </div>
 
       <details className="bfrr-primer">
-        <summary>No BFRR to sell? (Fee recipient ≠ receipt)</summary>
+        <summary>Why don’t I see a BFRR yet?</summary>
         <div className="bfrr-primer__body">
           <p>
-            This page only lists <strong>BFRR NFTs</strong> already in your wallet. You cannot pick a launch like{" "}
-            <span className="mono">$test</span> here and “convert” fee-recipient status into a BFRR — that step happens
-            in <strong>Bankr’s deposit / escrow flow</strong>, which moves your pool share on the fee manager so{" "}
+            You only sell <strong>BFRR NFTs</strong> in your wallet. Fee-recipient on Bankr is not the same — finish
+            escrow on{" "}
+            <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>{" "}
+            so{" "}
             <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
               BankrEscrowV3
             </a>{" "}
-            can mint the receipt to your address.
-          </p>
-          <p style={{ marginTop: "0.5rem" }}>
-            Use <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> (your launch / Bankr support)
-            to complete that flow first. Then return here — your BFRR should appear after mint, or paste the token ID
-            from BaseScan.
+            can mint the receipt, then it shows here (or paste the token ID from BaseScan).
           </p>
         </div>
       </details>
@@ -722,20 +734,20 @@ export default function App() {
           <div className="section-head">
             <h2>Your Bankr tokens (fees)</h2>
             <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-              {bankrLoading ? <><span className="spinner" />Loading…</> : "Load from Bankr API"}
+              {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
             </button>
           </div>
-          <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
-            Default upstream is Bankr’s public{" "}
-            <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">
-              creator-fees
-            </a>{" "}
-            endpoint (all tokens where you’re a creator beneficiary — not capped at 50 recent launches). Override with
-            Vercel env <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span> (e.g.{" "}
-            <span className="mono">https://api.bankr.bot/token-launches</span> for the recent list only).{" "}
-            <span className="mono">BANKR_API_KEY</span> is optional for public reads. Never use{" "}
-            <span className="mono">VITE_*</span> for secrets.
-          </p>
+          <div className="muted one-liner">
+            Loaded automatically from Bankr. Click a name to match a BFRR you hold;{" "}
+            <a href="https://docs.bankr.bot/token-launching/reading-fees/" target="_blank" rel="noreferrer">docs</a>
+            {" · "}
+            <details className="inline-details">
+              <summary>Deploy / env</summary>
+              <span className="mono">/api/bankr-launches</span> on Vercel. Optional{" "}
+              <span className="mono">BANKR_LAUNCHES_API_TEMPLATE</span>,{" "}
+              <span className="mono">BANKR_CREATOR_FEES_DAYS</span>.
+            </details>
+          </div>
           {bankrErr && <p className="err">{bankrErr}</p>}
           {bankrClickMsg && <p className="muted bankr-panel__hint">{bankrClickMsg}</p>}
           {bankrRows.length > 0 && (
@@ -777,11 +789,7 @@ export default function App() {
             </ul>
           )}
           {!bankrLoading && !bankrErr && bankrRows.length === 0 && (
-            <p className="muted" style={{ fontSize: "0.8rem" }}>
-              Tap <strong>Load from Bankr API</strong> (needs <span className="mono">/api/bankr-launches</span> on
-              Vercel or <span className="mono">vercel dev</span>). Click a token name to match it to a BFRR you hold and
-              jump to <strong>Your BFRRs</strong>; use ↗ for Bankr in a new tab.
-            </p>
+            <p className="muted one-liner">No creator-fee tokens returned for this wallet.</p>
           )}
         </section>
       )}
@@ -796,32 +804,19 @@ export default function App() {
             </span>
           </div>
 
-          <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
-            This list is only <strong>BFRR NFTs</strong> (receipt tokens) actually held in this MetaMask address on Base —
-            not “being a fee recipient” in Bankr’s app by itself. A fee beneficiary and a BFRR in your wallet are
-            different: the NFT is minted only when rights go through the <strong>escrow → receipt</strong> flow to your
-            address. If Bankr shows you as recipient but you never received that NFT here, there may be nothing to sell
-            until Bankr transfers the BFRR to this wallet (or you use the wallet that already holds it).
-          </p>
-          <p className="muted" style={{ margin: "0 0 1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
-            Wrong BFRR contract in ⚙ settings (old vs new deployment) or a transfer older than the scan window can also
-            hide tokens — use{" "}
-            <a
-              href={`https://basescan.org/token/${collection}?a=${address ?? ""}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              BaseScan → this wallet’s inventory for this contract
+          <p className="muted one-liner">
+            BFRRs you hold on Base (escrow → receipt). Not on Bankr as fee recipient alone.{" "}
+            <a href={`https://basescan.org/token/${collection}?a=${address ?? ""}`} target="_blank" rel="noreferrer">
+              BaseScan inventory
             </a>
-            . If you see a token ID there, paste it below and click <strong>Add</strong>.
+            {" — "}wrong contract in ⚙ or old transfers: paste token ID below.
           </p>
 
           {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
           {!scanning && allTokenIds.length === 0 && (
             <p className="empty">
-              No transfers to this address in the last {(Number(scanBlockSpan) / 1000).toFixed(0)}k blocks for this BFRR
-              contract.
+              No BFRR transfers found in the last {(Number(scanBlockSpan) / 1000).toFixed(0)}k blocks.
             </p>
           )}
 
