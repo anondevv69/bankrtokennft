@@ -6,6 +6,10 @@ interface ImportMetaEnv {
   readonly VITE_RPC_URL?: string;
   /** Documented for ops; app is hardcoded to Base mainnet (8453). Other values are ignored with a console warning. */
   readonly VITE_CHAIN_ID?: string;
+  /** Optional — enables WalletConnect QR (e.g. mobile wallet). Project id from https://cloud.reown.com/ */
+  readonly VITE_WALLETCONNECT_PROJECT_ID?: string;
+  /** Optional — `getLogs` depth when scanning Transfer events to find token IDs (max 500000). */
+  readonly VITE_RECEIPT_SCAN_BLOCKS?: string;
 }
 
 interface ImportMeta {

@@ -35,7 +35,7 @@ body {
 .mvp-banner {
   position: sticky;
   top: 0;
-  z-index: 200;
+  z-index: 50;
   margin: -2rem -1.25rem 1.25rem;
   padding: 0.85rem 1rem;
   text-align: center;
@@ -43,6 +43,12 @@ body {
   color: #0c0a09;
   border-bottom: 3px solid var(--banner-amber-dark);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  /* Sticky headers sit above scrolling content; without this, the banner captures clicks on fields below. */
+  pointer-events: none;
+}
+
+.mvp-banner * {
+  pointer-events: auto;
 }
 
 .mvp-banner__line1 {
@@ -150,9 +156,25 @@ button:disabled {
   cursor: not-allowed;
 }
 
-button.danger {
-  border-color: var(--danger);
-  color: var(--danger);
+.wallet-pick .row button {
+  flex: 1 1 auto;
+  min-width: 8.5rem;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+button.linkish {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.linkish:hover {
+  filter: brightness(1.12);
 }
 
 .muted {

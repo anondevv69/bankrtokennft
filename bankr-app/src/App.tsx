@@ -4,17 +4,41 @@ import {
   useAccount,
   useConnect,
   useDisconnect,
+  usePublicClient,
   useReadContract,
   useWriteContract,
   useChainId,
   useSwitchChain,
 } from "wagmi";
-import { injected } from "wagmi/connectors";
-import { isAddress, parseEther, formatEther, type Address } from "viem";
+import { isAddress, parseAbiItem, parseEther, formatEther, getAddress, type Address } from "viem";
 import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
 import { MVP_CHAIN_ID } from "./chain";
 
+const erc721BalanceAbi = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+] as const;
+
+const transferEvent = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+);
+
 const erc721Abi = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "tokenId", type: "uint256" },
+    ],
+    outputs: [],
+  },
   {
     type: "function",
     name: "setApprovalForAll",
@@ -24,6 +48,23 @@ const erc721Abi = [
       { name: "approved", type: "bool" },
     ],
     outputs: [],
+  },
+  {
+    type: "function",
+    name: "getApproved",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "isApprovedForAll",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "operator", type: "address" },
+    ],
+    outputs: [{ type: "bool" }],
   },
 ] as const;
 
@@ -37,14 +78,18 @@ export default function App() {
   const queryClient = useQueryClient();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { connect, isPending: connectPending } = useConnect();
+  const { connect, connectors, isPending: connectPending, variables: connectVariables } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: switchPending } = useSwitchChain();
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
+  const publicClient = usePublicClient();
 
   const [mpInput, setMpInput] = useState(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const [colInput, setColInput] = useState(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
   const [tokenIdStr, setTokenIdStr] = useState("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scannedIds, setScannedIds] = useState<string[]>([]);
+  const [scanErr, setScanErr] = useState<string | null>(null);
 
   const [offerEth, setOfferEth] = useState("0.01");
   const [listPriceEth, setListPriceEth] = useState("1");
@@ -73,6 +118,13 @@ export default function App() {
 
   const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
 
+  const scanBlockSpan = useMemo(() => {
+    const raw = (import.meta as ImportMeta).env.VITE_RECEIPT_SCAN_BLOCKS;
+    const n = typeof raw === "string" ? parseInt(raw, 10) : NaN;
+    if (Number.isFinite(n) && n > 0) return BigInt(Math.min(n, 500_000));
+    return 80_000n;
+  }, []);
+
   const { data: totalOffersWei } = useReadContract({
     address: readsEnabled ? marketplace : undefined,
     abi: feeRightsFixedSaleAbi,
@@ -80,6 +132,15 @@ export default function App() {
     args: readsEnabled && tokenId !== null ? [collection!, tokenId] : undefined,
     chainId: MVP_CHAIN_ID,
     query: { enabled: readsEnabled && !wrongNetwork },
+  });
+
+  const { data: myReceiptBalance } = useReadContract({
+    address: collection,
+    abi: erc721BalanceAbi,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: Boolean(collectionOk && collection && address && isConnected) },
   });
 
   const { data: myOfferWei } = useReadContract({
@@ -91,8 +152,58 @@ export default function App() {
     query: { enabled: readsEnabled && Boolean(address) && !wrongNetwork },
   });
 
+  const { data: approvedSpender } = useReadContract({
+    address: readsEnabled ? collection : undefined,
+    abi: erc721Abi,
+    functionName: "getApproved",
+    args: readsEnabled && tokenId !== null ? [tokenId] : undefined,
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: readsEnabled && tokenId !== null && !wrongNetwork },
+  });
+
+  const { data: approvedForAll } = useReadContract({
+    address: readsEnabled ? collection : undefined,
+    abi: erc721Abi,
+    functionName: "isApprovedForAll",
+    args: readsEnabled && address && marketplace ? [address, marketplace] : undefined,
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: readsEnabled && Boolean(address) && Boolean(marketplace) && !wrongNetwork },
+  });
+
   const invalidate = () => {
     void queryClient.invalidateQueries();
+  };
+
+  const scanTransfersToWallet = async () => {
+    if (!publicClient || !collection || !address || !collectionOk) return;
+    setScanErr(null);
+    setScannedIds([]);
+    setScanLoading(true);
+    try {
+      const latest = await publicClient.getBlockNumber();
+      const span = scanBlockSpan;
+      const fromBlock = latest > span ? latest - span : 0n;
+      const logs = await publicClient.getLogs({
+        address: collection,
+        event: transferEvent,
+        args: { to: address },
+        fromBlock,
+        toBlock: latest,
+      });
+      const rawIds = logs.map((l) => l.args.tokenId).filter((t): t is bigint => typeof t === "bigint");
+      const uniq = [...new Set(rawIds.map((x) => x.toString()))].sort((a, b) =>
+        BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0,
+      );
+      setScannedIds(uniq);
+    } catch (e) {
+      setScanErr(
+        e instanceof Error
+          ? e.message
+          : "Scan failed — public RPCs often cap `getLogs` range; set `VITE_RPC_URL` to a paid Base endpoint.",
+      );
+    } finally {
+      setScanLoading(false);
+    }
   };
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -106,6 +217,18 @@ export default function App() {
 
   const txDisabled = !isConnected || writePending || wrongNetwork;
 
+  const singleTokenApproved =
+    readsEnabled &&
+    tokenId !== null &&
+    marketplace &&
+    typeof approvedSpender === "string" &&
+    isAddress(approvedSpender) &&
+    getAddress(approvedSpender as Address) === getAddress(marketplace);
+
+  const operatorForAll = approvedForAll === true;
+
+  const canMarketplacePullToken = Boolean(readsEnabled && (singleTokenApproved || operatorForAll));
+
   return (
     <>
       <div className="mvp-banner" role="status">
@@ -115,22 +238,37 @@ export default function App() {
 
       <h1>Bankr sale</h1>
       <p className="sub">
-        Simple flow: <strong>sell</strong> at a fixed price (or <strong>cancel</strong> the sale), or let people{" "}
-        <strong>offer</strong> ETH — you can <strong>accept</strong> an offer or ignore it. On <strong>Base</strong> with
-        real Bankr receipt tokens. Wallet-only signing — never paste private keys here or in Railway.
+        This is a <strong>local dev console</strong> for the on-chain marketplace — not the in-Bankr Marketplace UI (that
+        app reads Bankr APIs to show &quot;eligible&quot; launches). Here you paste contract addresses and token id, or
+        scan recent transfers below.
       </p>
 
       <div className="panel">
         <h2>Wallet</h2>
         {!isConnected ? (
-          <button
-            type="button"
-            className="primary"
-            disabled={connectPending}
-            onClick={() => connect({ connector: injected(), chainId: MVP_CHAIN_ID })}
-          >
-            {connectPending ? "Connecting…" : "Connect wallet (Base)"}
-          </button>
+          <div className="wallet-pick">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Choose which extension or app signs txs. Same browser always reconnecting the same address?{" "}
+              <strong>Disconnect</strong>, then in MetaMask (or your wallet) use the <strong>account switcher</strong>, then
+              connect again. Optional: set <code className="mono">VITE_WALLETCONNECT_PROJECT_ID</code> in{" "}
+              <code className="mono">.env</code> for a WalletConnect QR (mobile wallets).
+            </p>
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "0.75rem" }}>
+              {connectors.map((connector) => (
+                <button
+                  key={connector.uid}
+                  type="button"
+                  className="primary"
+                  disabled={connectPending}
+                  onClick={() => connect({ connector, chainId: MVP_CHAIN_ID })}
+                >
+                  {connectPending && connectVariables?.connector?.uid === connector.uid
+                    ? "Connecting…"
+                    : connector.name}
+                </button>
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="row">
             <span className="mono muted">{address}</span>
@@ -160,11 +298,13 @@ export default function App() {
         </div>
       )}
 
-      {!wrongNetwork && (
-        <>
-          <div className="panel">
-            <h2>Which token</h2>
-            <label htmlFor="mp">Marketplace contract</label>
+      <>
+        <div className="panel">
+          <h2>Which token</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Fields stay editable even on the wrong network so you can paste addresses, then switch to Base to sign.
+          </p>
+          <label htmlFor="mp">Marketplace contract</label>
             <input
               id="mp"
               placeholder="FeeRightsFixedSale 0x…"
@@ -181,10 +321,52 @@ export default function App() {
             <label htmlFor="tid">Token ID</label>
             <input
               id="tid"
-              placeholder="e.g. 12345"
+              placeholder="Full uint256 from escrow.tokenIdFor(…)"
               value={tokenIdStr}
               onChange={(e) => setTokenIdStr(e.target.value)}
             />
+            {collectionOk && isConnected && address && (
+              <div className="readout" style={{ marginBottom: "0.85rem" }}>
+                <div>
+                  <span className="muted">BFRR balance for your wallet — </span>
+                  <strong>{String(myReceiptBalance ?? "…")}</strong>
+                  {wrongNetwork && (
+                    <span className="muted"> (reads still use Base RPC; switch wallet to Base to send txs)</span>
+                  )}
+                </div>
+                <div style={{ marginTop: "0.65rem", display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <a
+                    className="muted"
+                    style={{ color: "var(--accent)" }}
+                    href={`https://basescan.org/token/${collectionAddr}?a=${address}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open BaseScan inventory for this collection →
+                  </a>
+                </div>
+                <div style={{ marginTop: "0.65rem" }}>
+                  <button type="button" disabled={scanLoading} onClick={() => void scanTransfersToWallet()}>
+                    {scanLoading ? "Scanning logs…" : `Scan Transfer logs (last ~${scanBlockSpan} blocks)`}
+                  </button>
+                </div>
+                {scanErr && <p className="err" style={{ marginTop: "0.5rem", marginBottom: 0 }}>{scanErr}</p>}
+                {scannedIds.length > 0 && (
+                  <div style={{ marginTop: "0.65rem" }}>
+                    <span className="muted">Token IDs received in range (click to fill):</span>
+                    <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.2rem" }}>
+                      {scannedIds.map((id) => (
+                        <li key={id}>
+                          <button type="button" className="linkish" onClick={() => setTokenIdStr(id)}>
+                            {id}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
             {readsEnabled && tokenId !== null && (
               <div className="readout">
                 <div>
@@ -205,10 +387,47 @@ export default function App() {
             <h2>Sell at a price — or cancel</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               List = you want to sell at this ETH price. Cancel = you changed your mind and get the NFT back from the
-              marketplace contract.
+              marketplace contract. Prefer <strong>approve this token only</strong> — wallets often warn less than{" "}
+              <code className="mono">setApprovalForAll</code> (entire collection).
             </p>
+            {readsEnabled && tokenId !== null && (
+              <p className="muted" style={{ marginTop: 0 }}>
+                Approval state:{" "}
+                {singleTokenApproved ? (
+                  <strong style={{ color: "var(--accent)" }}>this token → marketplace</strong>
+                ) : (
+                  <span>not single-token approved</span>
+                )}
+                {operatorForAll ? (
+                  <>
+                    {" "}
+                    · <strong style={{ color: "var(--banner-amber)" }}>operator for all</strong> (max privilege)
+                  </>
+                ) : null}
+              </p>
+            )}
             <button
               type="button"
+              className="primary"
+              disabled={txDisabled || !readsEnabled}
+              onClick={() =>
+                run(async () => {
+                  if (!readsEnabled || !collection || !marketplace || tokenId === null) return;
+                  await writeContractAsync({
+                    address: collection,
+                    abi: erc721Abi,
+                    functionName: "approve",
+                    args: [marketplace, tokenId],
+                    chainId: MVP_CHAIN_ID,
+                  });
+                })
+              }
+            >
+              Step 1 — Approve marketplace for this token only
+            </button>
+            <button
+              type="button"
+              style={{ marginTop: "0.5rem" }}
               disabled={txDisabled || !readsEnabled}
               onClick={() =>
                 run(async () => {
@@ -223,7 +442,7 @@ export default function App() {
                 })
               }
             >
-              Step 1 — Approve marketplace on your receipt
+              Optional — Approve marketplace for all tokens in this collection
             </button>
             <label htmlFor="lp" style={{ marginTop: "1rem" }}>
               Your sale price (ETH)
@@ -232,7 +451,7 @@ export default function App() {
             <button
               type="button"
               className="primary"
-              disabled={txDisabled || !readsEnabled}
+              disabled={txDisabled || !readsEnabled || !canMarketplacePullToken}
               onClick={() =>
                 run(async () => {
                   if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
@@ -248,6 +467,11 @@ export default function App() {
             >
               List for sale
             </button>
+            {!canMarketplacePullToken && readsEnabled && (
+              <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0 }}>
+                Complete Step 1 (single-token approve or optional collection-wide) before listing.
+              </p>
+            )}
             <label htmlFor="lid" style={{ marginTop: "1rem" }}>
               Listing ID (to cancel)
             </label>
@@ -381,7 +605,6 @@ export default function App() {
             </button>
           </div>
         </>
-      )}
 
       {writeError && <p className="err">{writeError.message}</p>}
 

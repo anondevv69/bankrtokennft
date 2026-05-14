@@ -1,6 +1,6 @@
 # Bankr app (web)
 
-Minimal **Base mainnet** UI for `FeeRightsFixedSale`: **sell at a price or cancel**, **offers** (send, pull back, accept), **buy** a listing — for real Bankr receipt NFTs. Hardcoded to **Base (chain id 8453)** only; wrong network shows a gate and blocks reads/writes from this UI.
+Minimal **Base mainnet** UI for `FeeRightsFixedSale`: **sell at a price or cancel**, **offers** (send, pull back, accept), **buy** a listing — for real Bankr receipt NFTs. Listing flow prefers **`approve(marketplace, tokenId)`** (one NFT) over **`setApprovalForAll`** (entire collection) so wallets may show softer warnings. Hardcoded to **Base (chain id 8453)** only; wrong network shows a gate and blocks txs from this UI.
 
 ## Node version
 
@@ -39,6 +39,18 @@ npm run dev
 ```
 
 Opens on port **5174** by default. Your wallet must be on **Base mainnet** to transact.
+
+### Switching to a different address / wallet
+
+The dev UI lists **separate connect buttons** (MetaMask, Coinbase Wallet, optional WalletConnect, and a generic injected fallback). If you always get the same address:
+
+1. Click **Disconnect** in the app.
+2. In your extension, **switch accounts** (MetaMask: account avatar / account menu), or connect a different profile.
+3. Click the connector you want again.
+
+For a **phone wallet** or a wallet that is not the browser’s default `window.ethereum`, add **`VITE_WALLETCONNECT_PROJECT_ID`** to `.env` (free project id from [Reown Cloud](https://cloud.reown.com/)), restart `npm run dev`, then use the **WalletConnect** button.
+
+**Receipt token IDs:** BFRR is not enumerable on-chain. This app shows **`balanceOf`** for the receipt contract, a **BaseScan inventory** link, and a **Transfer log scan** over the last _N_ blocks (`VITE_RECEIPT_SCAN_BLOCKS`, default 80000). Older mints may not appear — paste `tokenId` from `escrow.tokenIdFor` or Bankr if needed.
 
 ### Vite env vars (important for deploys)
 
