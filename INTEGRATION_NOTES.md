@@ -89,7 +89,7 @@ On-chain reality for **`FeeRightsFixedSale`**:
 - **Not for sale:** Seller **holds** BFRR in their wallet; no **active** listing for that `(collection, tokenId)` on the marketplace.  
 - **For sale:** Seller called **`list`** → BFRR is **held by the marketplace contract** until **`buy`** or **`cancel`**; then it goes to buyer or back to seller.
 
-There is **no** third “optional / in-between” listing state. If the Bankr UI labels **“List for sale” as optional** inside a single **Sell** orchestration, users infer a wrong lifecycle. **Product ask for Bankr:** split explicit modes — **“Mint receipt only (no list)”** vs **“List for sale”** (requires **price &gt; 0** and runs **`approve` → `list`**) — and **never** imply “0 ETH to skip listing” in the same breath as selling.
+There is **no** third “optional / in-between” listing state. **Update (Bankr `bankr-marketplace-v1` v1.62, May 2026):** Bankr shipped **split flows** — **mint receipt** (3 steps) vs **sell rights** (4 steps) — **required listing** with enforced price, and removed **“Optional”** / **“0 to skip”** labels. Re-run through **SELL** in-app and confirm custodial **`approve`** + **`list`** against pinned addresses still succeed after any vendor index lag.
 
 ## Observations
 
