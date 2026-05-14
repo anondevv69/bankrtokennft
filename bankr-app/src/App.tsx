@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -90,6 +90,47 @@ function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   return `https://bankr.bot/launches/search?q=${encodeURIComponent(wallet)}`;
 }
 
+function normPoolIdHex(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.startsWith("0x")) return null;
+  const h = raw.toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(h) ? h : null;
+}
+
+/** Match Bankr creator-fees row to a BFRR tokenId already in this wallet (positionOf). */
+async function findBfrrTokenIdForBankrRow(
+  publicClient: PublicClient,
+  collection: Address,
+  tokenIds: string[],
+  row: Record<string, unknown>,
+): Promise<string | null> {
+  const poolHex = normPoolIdHex(row.poolId);
+  const tokRaw = row.tokenAddress;
+  const tokenAddr =
+    typeof tokRaw === "string" && tokRaw.startsWith("0x") && isAddress(tokRaw, { strict: false })
+      ? getAddress(tokRaw)
+      : null;
+
+  for (const id of tokenIds) {
+    try {
+      const pos = await publicClient.readContract({
+        address: collection,
+        abi: bankrFeeRightsReceiptAbi,
+        functionName: "positionOf",
+        args: [BigInt(id)],
+      });
+      const pid = typeof pos.poolId === "string" ? pos.poolId.toLowerCase() : "";
+      if (poolHex && pid === poolHex) return id;
+      if (tokenAddr) {
+        const t0 = getAddress(pos.token0);
+        const t1 = getAddress(pos.token1);
+        if (t0 === tokenAddr || t1 === tokenAddr) return id;
+      }
+    } catch {
+      /* RPC or invalid id */
+    }
+  }
+  return null;
+}
 
 function parseNftImage(tokenUri: unknown): string | null {
   if (!tokenUri || typeof tokenUri !== "string") return null;
@@ -455,6 +496,9 @@ export default function App() {
   const [bankrLoading, setBankrLoading] = useState(false);
   const [bankrErr, setBankrErr] = useState<string | null>(null);
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
+  const [bankrRowBusy, setBankrRowBusy] = useState(false);
+  const [bankrClickMsg, setBankrClickMsg] = useState<string | null>(null);
+  const bfrrSectionRef = useRef<HTMLElement | null>(null);
 
   const marketplace = tryParseAddress(mpInput);
   const collection  = tryParseAddress(colInput);
@@ -527,6 +571,7 @@ export default function App() {
     setBankrLoading(true);
     setBankrErr(null);
     setBankrRows([]);
+    setBankrClickMsg(null);
     try {
       const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
       const json = (await res.json()) as {
@@ -550,6 +595,51 @@ export default function App() {
       );
     } finally {
       setBankrLoading(false);
+    }
+  };
+
+  const scrollToBfrr = () => {
+    requestAnimationFrame(() => {
+      bfrrSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const onBankrTokenClick = async (row: Record<string, unknown>) => {
+    setBankrClickMsg(null);
+    if (!publicClient) {
+      setBankrClickMsg("Wallet RPC not ready — try again in a moment.");
+      return;
+    }
+    if (!collection) {
+      setBankrClickMsg("Set the BFRR contract address in ⚙ settings first, then click again.");
+      return;
+    }
+    if (allTokenIds.length === 0) {
+      setBankrClickMsg(
+        "No BFRR token IDs in this wallet yet. Complete Bankr’s escrow → receipt flow so a BFRR mints here, " +
+          "or paste your BFRR token ID in the field below, then click this token again.",
+      );
+      scrollToBfrr();
+      return;
+    }
+    setBankrRowBusy(true);
+    try {
+      const matched = await findBfrrTokenIdForBankrRow(publicClient, collection, allTokenIds, row);
+      if (matched) {
+        setSelectedId(matched);
+        setBankrClickMsg(null);
+        scrollToBfrr();
+      } else {
+        setBankrClickMsg(
+          "None of your BFRRs on file match this launch (pool / token pair). If you hold a BFRR for it, " +
+            "paste its token ID below and click Add, then try this row again.",
+        );
+        scrollToBfrr();
+      }
+    } catch {
+      setBankrClickMsg("Could not read BFRR positions — check RPC or BFRR contract in settings.");
+    } finally {
+      setBankrRowBusy(false);
     }
   };
 
@@ -647,22 +737,50 @@ export default function App() {
             <span className="mono">VITE_*</span> for secrets.
           </p>
           {bankrErr && <p className="err">{bankrErr}</p>}
+          {bankrClickMsg && <p className="muted bankr-panel__hint">{bankrClickMsg}</p>}
           {bankrRows.length > 0 && (
             <ul className="bankr-panel__list">
-              {bankrRows.map((row, i) => (
-                <li key={i}>
-                  <a href={launchRowHref(row, address)} target="_blank" rel="noreferrer">
-                    {launchRowLabel(row)}
-                  </a>
-                </li>
-              ))}
+              {bankrRows.map((row, i) => {
+                const ta = row.tokenAddress;
+                const pid = row.poolId;
+                const key =
+                  typeof ta === "string" && ta.startsWith("0x")
+                    ? ta.toLowerCase()
+                    : typeof pid === "string"
+                      ? `${pid}-${i}`
+                      : `row-${i}`;
+                return (
+                  <li key={key}>
+                    <div className="bankr-panel__row">
+                      <button
+                        type="button"
+                        className="bankr-panel__token"
+                        disabled={bankrRowBusy || wrongNetwork}
+                        onClick={() => void onBankrTokenClick(row)}
+                        title="Try to select matching BFRR and open sell flow"
+                      >
+                        {launchRowLabel(row)}
+                      </button>
+                      <a
+                        className="bankr-panel__row-ext"
+                        href={launchRowHref(row, address)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open on Bankr"
+                      >
+                        ↗
+                      </a>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
           {!bankrLoading && !bankrErr && bankrRows.length === 0 && (
             <p className="muted" style={{ fontSize: "0.8rem" }}>
               Tap <strong>Load from Bankr API</strong> (needs <span className="mono">/api/bankr-launches</span> on
-              Vercel or <span className="mono">vercel dev</span>). Each row links to Bankr search for that token
-              address when available.
+              Vercel or <span className="mono">vercel dev</span>). Click a token name to match it to a BFRR you hold and
+              jump to <strong>Your BFRRs</strong>; use ↗ for Bankr in a new tab.
             </p>
           )}
         </section>
@@ -670,7 +788,7 @@ export default function App() {
 
       {/* ── Your BFRRs ── */}
       {isConnected && address && !wrongNetwork && collection && (
-        <section>
+        <section ref={bfrrSectionRef}>
           <div className="section-head">
             <h2>Your BFRRs</h2>
             <span className="scan-status">

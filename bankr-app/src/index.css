@@ -627,7 +627,7 @@ input::placeholder { color: var(--muted); }
 
 .bankr-panel__list li {
   border-bottom: 1px solid var(--border);
-  padding: 0.55rem 0.85rem;
+  padding: 0.45rem 0.55rem;
   font-size: 0.88rem;
 }
 
@@ -635,6 +635,52 @@ input::placeholder { color: var(--muted); }
   border-bottom: none;
 }
 
-.bankr-panel__list a {
+.bankr-panel__hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.bankr-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.bankr-panel__token {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
   font-weight: 600;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--accent);
+  background: var(--accent-lo);
+  border: 1px solid var(--accent-md);
+  border-radius: var(--r-xs);
+  padding: 0.4rem 0.65rem;
+}
+
+.bankr-panel__token:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bankr-panel__token:hover:not(:disabled) {
+  background: var(--accent-md);
+}
+
+.bankr-panel__row-ext {
+  flex-shrink: 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border-hi);
+  color: var(--accent);
+  line-height: 1;
+  text-decoration: none !important;
+}
+
+.bankr-panel__row-ext:hover {
+  background: var(--surface-2);
 }

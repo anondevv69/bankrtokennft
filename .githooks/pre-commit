@@ -1,0 +1,15 @@
+#!/bin/sh
+# Enforce repo author for Vercel/GitHub attribution (Hobby private repos).
+# Enable once: git config core.hooksPath .githooks
+expected_name="Anondevv"
+expected_email="Gregoryrestevez@gmail.com"
+name=$(git config user.name)
+email=$(git config user.email)
+if [ "$name" != "$expected_name" ] || [ "$email" != "$expected_email" ]; then
+  echo "" >&2
+  echo "  Git author must be: $expected_name <$expected_email>" >&2
+  echo "  Current: ${name:-<unset>} <${email:-unset}>" >&2
+  echo "  Fix: git config user.name '$expected_name' && git config user.email '$expected_email'" >&2
+  echo "" >&2
+  exit 1
+fi
