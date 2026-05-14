@@ -2,7 +2,11 @@
 
 Ask the user for **facts in one message** so you never guess chain, addresses, or order.
 
-## Sell fee rights (full path → BFRR, optional list)
+## Sell fee rights (two product paths)
+
+**Path A — Receipt only (no marketplace listing):** escrow → beneficiary → finalize → user holds BFRR; **no** `FeeRightsFixedSale.list`.
+
+**Path B — List for sale:** after BFRR exists in seller wallet, **`approve(marketplace, tokenId)`** then **`list`** with **`priceWei > 0`**. On-chain: **listed** (marketplace holds NFT) until **buy** or **cancel** returns it. **Not** “optional list” inside the same mental model as Path A — use a **separate** CTA in the app.
 
 User should send something like:
 
@@ -13,8 +17,8 @@ My wallet (seller): 0x...
 Escrow (BankrEscrowV3): 0x...   # canonical deploy
 BFRR collection: 0x...
 Marketplace (FeeRightsFixedSale): 0x...
-List after mint: yes | no
-If yes, list price ETH: <number>   # must be > 0 if listing
+Path: receipt_only | list_for_sale
+If list_for_sale: list price ETH: <number>   # must be > 0
 ```
 
 **You (agent) must then:**
@@ -35,6 +39,18 @@ When the seller already holds BFRR (finalize done), add a "List only" path on SE
 - Collect list price in ETH (> 0).
 - Call approve(FeeRightsFixedSale, tokenId) then list(...) — skip prepareDeposit, beneficiary, and mint in the wizard.
 - Keep the full orchestration for users who have not finalized yet.
+```
+
+## Bankr UI — listing is binary (paste to product)
+
+```text
+FeeRightsFixedSale has no "optional listing" state: either the BFRR is listed (held by marketplace until buy/cancel) or it is not (seller holds it).
+
+Please remove "Optional" from the List step in Sell orchestration. Use two explicit flows:
+- "Receipt only" = mint BFRR, no list.
+- "List for sale" = require price > 0 and run approve + list; cancel listing returns BFRR to seller.
+
+Do not use "0 ETH to skip listing" in the same flow as selling — that contradicts on-chain ZeroPrice.
 ```
 
 ## Buy a listed BFRR

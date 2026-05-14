@@ -2,7 +2,7 @@
 name: bankr-fee-rights
 description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 6
+version: 7
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -145,7 +145,7 @@ prepareDeposit(
 
 **Collection** is always the **BFRR** contract (`BankrFeeRightsReceipt`). **`tokenId`** is the receipt id (uint256). **`priceWei`** is the ask in **wei** (1 ETH = `1000000000000000000`). There is **no** USDC path in this MVP — **ETH only**.
 
-**Product rule:** If the flow is branded **“Sell rights + list”** (single orchestrated job that includes listing), the UI must **require a positive ETH price** before starting. On-chain **`list` reverts with `ZeroPrice` if `priceWei == 0`**. Do **not** show “0 to skip” for that flow—either **omit the list step entirely** behind a separate “wrap only” entry point, or **require** `priceWei > 0`. Same for labels: step 4 should not read **Optional** if listing is always part of that product.
+**Product rule:** **`FeeRightsFixedSale`** is **binary**: either the BFRR is **actively listed** (NFT in marketplace custody until **`buy`** or **`cancel`**) or **not listed** (seller holds BFRR). There is no meaningful “optional listing” step inside one Sell wizard — that confuses users. If the flow is branded **“Sell rights + list”** (listing is in scope), **require a positive ETH price** before starting; **do not** label **`list` as Optional** or “0 to skip.” Use a **separate** **“Receipt only”** path with **no** `list` when users only want BFRR. On-chain **`list` reverts with `ZeroPrice` if `priceWei == 0`**.
 
 1. **Choose price in ETH** → convert to wei (e.g. `1.5` ETH → `1500000000000000000`). Double-check decimals: **18** for native ETH in `priceWei`.
 2. **Approve** the marketplace to move your NFT (one-time per collection is enough with `setApprovalForAll`):

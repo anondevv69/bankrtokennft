@@ -82,6 +82,15 @@ Track real Base Sepolia / Bankr behavior here. Do not record private keys, seed 
 
 **`isEscrowed(poolId)` on escrow** and **`ownerOf(tokenId)` on BFRR** answer **different** questions — both can be “active” after finalize (seller holds receipt NFT; escrow holds the fee-rights position for the pool).
 
+### FeeRightsFixedSale listing — binary state (no fuzzy “optional list”)
+
+On-chain reality for **`FeeRightsFixedSale`**:
+
+- **Not for sale:** Seller **holds** BFRR in their wallet; no **active** listing for that `(collection, tokenId)` on the marketplace.  
+- **For sale:** Seller called **`list`** → BFRR is **held by the marketplace contract** until **`buy`** or **`cancel`**; then it goes to buyer or back to seller.
+
+There is **no** third “optional / in-between” listing state. If the Bankr UI labels **“List for sale” as optional** inside a single **Sell** orchestration, users infer a wrong lifecycle. **Product ask for Bankr:** split explicit modes — **“Mint receipt only (no list)”** vs **“List for sale”** (requires **price &gt; 0** and runs **`approve` → `list`**) — and **never** imply “0 ETH to skip listing” in the same breath as selling.
+
 ## Observations
 
 - Ownership propagation:

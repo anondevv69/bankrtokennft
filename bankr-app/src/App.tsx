@@ -416,9 +416,9 @@ export default function App() {
           <div className="panel">
             <h2>Sell at a price — or cancel</h2>
             <p className="muted" style={{ marginTop: 0 }}>
-              List = you want to sell at this ETH price. Cancel = you changed your mind and get the NFT back from the
-              marketplace contract. Prefer <strong>approve this token only</strong> — wallets often warn less than{" "}
-              <code className="mono">setApprovalForAll</code> (entire collection).
+              On-chain: you are either <strong>listed</strong> (BFRR held by the marketplace until someone buys or you
+              cancel) or <strong>not listed</strong> (you hold BFRR). Prefer <strong>approve this token only</strong> —
+              wallets often warn less than <code className="mono">setApprovalForAll</code> (entire collection).
             </p>
             {readsEnabled && tokenId !== null && (
               <p className="muted" style={{ marginTop: 0 }}>
