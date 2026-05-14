@@ -530,6 +530,26 @@ export default function App() {
         <p>Buy and sell Bankr fee rights receipts on Base.</p>
       </div>
 
+      <details className="bfrr-primer">
+        <summary>No BFRR to sell? (Fee recipient ≠ receipt)</summary>
+        <div className="bfrr-primer__body">
+          <p>
+            This page only lists <strong>BFRR NFTs</strong> already in your wallet. You cannot pick a launch like{" "}
+            <span className="mono">$test</span> here and “convert” fee-recipient status into a BFRR — that step happens
+            in <strong>Bankr’s deposit / escrow flow</strong>, which moves your pool share on the fee manager so{" "}
+            <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">
+              BankrEscrowV3
+            </a>{" "}
+            can mint the receipt to your address.
+          </p>
+          <p style={{ marginTop: "0.5rem" }}>
+            Use <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> (your launch / Bankr support)
+            to complete that flow first. Then return here — your BFRR should appear after mint, or paste the token ID
+            from BaseScan.
+          </p>
+        </div>
+      </details>
+
       {/* ── Your BFRRs ── */}
       {isConnected && address && !wrongNetwork && collection && (
         <section>
