@@ -531,7 +531,7 @@ export default function App() {
       </div>
 
       {/* ── Your BFRRs ── */}
-      {isConnected && !wrongNetwork && collection && (
+      {isConnected && address && !wrongNetwork && collection && (
         <section>
           <div className="section-head">
             <h2>Your BFRRs</h2>
@@ -540,9 +540,24 @@ export default function App() {
             </span>
           </div>
 
-          <p className="muted" style={{ margin: "-0.5rem 0 1rem", fontSize: "0.8rem", lineHeight: 1.45 }}>
-            Only tokens <strong>in this connected wallet</strong> on Base appear here. Custodial Bankr balances use a
-            different address — connect that wallet, or paste the token ID from BaseScan.
+          <p className="muted" style={{ margin: "-0.5rem 0 0.75rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
+            This list is only <strong>BFRR NFTs</strong> (receipt tokens) actually held in this MetaMask address on Base —
+            not “being a fee recipient” in Bankr’s app by itself. A fee beneficiary and a BFRR in your wallet are
+            different: the NFT is minted only when rights go through the <strong>escrow → receipt</strong> flow to your
+            address. If Bankr shows you as recipient but you never received that NFT here, there may be nothing to sell
+            until Bankr transfers the BFRR to this wallet (or you use the wallet that already holds it).
+          </p>
+          <p className="muted" style={{ margin: "0 0 1rem", fontSize: "0.8rem", lineHeight: 1.5 }}>
+            Wrong BFRR contract in ⚙ settings (old vs new deployment) or a transfer older than the scan window can also
+            hide tokens — use{" "}
+            <a
+              href={`https://basescan.org/token/${collection}?a=${address ?? ""}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              BaseScan → this wallet’s inventory for this contract
+            </a>
+            . If you see a token ID there, paste it below and click <strong>Add</strong>.
           </p>
 
           {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
