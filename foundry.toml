@@ -4,4 +4,10 @@ out = "out"
 libs = ["lib"]
 solc = "0.8.24"
 
+# via-ir is required for contracts with complex on-chain SVG/metadata generation
+# (avoids "stack too deep" errors in tokenURI and similar view functions)
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

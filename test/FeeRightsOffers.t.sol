@@ -17,15 +17,16 @@ contract FeeRightsOffersTest is Test {
     FeeRightsFixedSale private sale;
     MockERC721Offers private nft;
 
-    address private constant SELLER = address(0x5E11);
-    address private constant BIDDER = address(0xB1D);
-    address private constant BIDDER2 = address(0xB2D);
-    address private constant OTHER = address(0xCAFE);
+    address private constant SELLER    = address(0x5E11);
+    address private constant BIDDER    = address(0xB1D);
+    address private constant BIDDER2   = address(0xB2D);
+    address private constant OTHER     = address(0xCAFE);
+    address private constant FEE_VAULT = address(0xFEE5);
 
     uint256 private constant TOKEN_ID = 42;
 
     function setUp() public {
-        sale = new FeeRightsFixedSale();
+        sale = new FeeRightsFixedSale(FEE_VAULT);
         nft = new MockERC721Offers();
         nft.mint(SELLER, TOKEN_ID);
     }
@@ -69,7 +70,9 @@ contract FeeRightsOffersTest is Test {
         vm.stopPrank();
 
         assertEq(nft.ownerOf(TOKEN_ID), BIDDER);
-        assertEq(SELLER.balance, 2 ether);
+        // 2 % platform fee on 2 ether = 0.04 ether → vault; seller gets 1.96 ether
+        assertEq(SELLER.balance,    (2 ether * 9800) / 10_000, "seller net");
+        assertEq(FEE_VAULT.balance, (2 ether *  200) / 10_000, "vault fee");
         assertEq(sale.offerWei(address(nft), TOKEN_ID, BIDDER), 0);
         assertEq(sale.totalOfferWei(address(nft), TOKEN_ID), 0);
     }

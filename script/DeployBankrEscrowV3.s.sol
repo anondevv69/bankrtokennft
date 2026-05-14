@@ -5,10 +5,21 @@ import {Script, console2} from "forge-std/Script.sol";
 import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 
 /// @title DeployBankrEscrowV3
-/// @notice Deploys Escrow V3 (balance-delta accounting + ERC721 receipt). The receipt contract is created by the escrow constructor.
-/// @dev Production: Base mainnet. Example:
-///      forge script script/DeployBankrEscrowV3.s.sol --rpc-url $BASE_MAINNET_RPC_URL --private-key $PRIVATE_KEY --broadcast
-///      Lab: same script with Base Sepolia RPC for throwaway testing.
+/// @notice Deploys Escrow V3 (balance-delta accounting + ERC721 receipt with on-chain SVG).
+///         The receipt contract (BankrFeeRightsReceipt) is created inside the escrow constructor.
+///
+/// @dev Reads env vars:
+///      PRIVATE_KEY           — deployer key (required)
+///      ESCROW_INITIAL_OWNER  — owner address; defaults to deployer
+///      INITIAL_FEE_MANAGERS  — comma-separated list of fee manager addresses to allowlist
+///      FACTORY_NAME          — display name baked into NFT images (default: "Bankr")
+///
+///      Production (Base mainnet):
+///        export FACTORY_NAME="Bankr"
+///        export INITIAL_FEE_MANAGERS=0xFeeManager1,0xFeeManager2
+///        forge script script/DeployBankrEscrowV3.s.sol \
+///          --rpc-url $BASE_MAINNET_RPC_URL --private-key $PRIVATE_KEY --broadcast --verify \
+///          --etherscan-api-key $ETHERSCAN_API_KEY
 contract DeployBankrEscrowV3 is Script {
     function run() external returns (BankrEscrowV3 escrow) {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -16,10 +27,12 @@ contract DeployBankrEscrowV3 is Script {
         address configuredOwner = vm.envOr("ESCROW_INITIAL_OWNER", address(0));
         address initialOwner = configuredOwner == address(0) ? deployer : configuredOwner;
         string memory feeManagersCsv = vm.envOr("INITIAL_FEE_MANAGERS", string(""));
+        string memory factoryName = vm.envOr("FACTORY_NAME", string("Bankr"));
 
         console2.log("Deploying BankrEscrowV3");
-        console2.log("Deployer:", deployer);
-        console2.log("Initial owner:", initialOwner);
+        console2.log("  Deployer:      ", deployer);
+        console2.log("  Initial owner: ", initialOwner);
+        console2.log("  Factory name:  ", factoryName);
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -28,13 +41,14 @@ contract DeployBankrEscrowV3 is Script {
 
         for (uint256 i = 0; i < feeManagers.length; i++) {
             escrow.setFeeManagerAllowed(feeManagers[i], true);
-            console2.log("Allowed fee manager:", feeManagers[i]);
+            escrow.setFactoryName(feeManagers[i], factoryName);
+            console2.log("  Allowed + named fee manager:", feeManagers[i]);
         }
 
         vm.stopBroadcast();
 
-        console2.log("BankrEscrowV3 deployed:", address(escrow));
-        console2.log("BankrFeeRightsReceipt:", address(escrow.receipt()));
+        console2.log("BankrEscrowV3 deployed:       ", address(escrow));
+        console2.log("BankrFeeRightsReceipt deployed:", address(escrow.receipt()));
     }
 
     function _parseAddressCsv(string memory csv) internal pure returns (address[] memory addresses) {
@@ -62,11 +76,9 @@ contract DeployBankrEscrowV3 is Script {
     function _slice(string memory input, uint256 start, uint256 end) internal pure returns (string memory result) {
         bytes memory inputBytes = bytes(input);
         bytes memory output = new bytes(end - start);
-
         for (uint256 i = start; i < end; i++) {
             output[i - start] = inputBytes[i];
         }
-
         result = string(output);
     }
 }

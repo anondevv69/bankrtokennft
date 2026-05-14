@@ -81,7 +81,10 @@ Never tell the user **“success”** until the matching tx **mined** and reads 
 ## Custodial scanner vs listing (Bankr marketplace)
 
 - **`list`** on **`FeeRightsFixedSale`** requires prior **`approve`/`setApprovalForAll`** on **BFRR** for the marketplace address — **two** txs (or a deliberate multicall), not one magic **`list`**.  
-- If **`approve`** is blocked with **`unverified_contract`** despite **BaseScan** verification: **Sourcify** + **wait**; **escalate** with Bankr if **>24h**; recommend **external wallet login** or **NFT transfer to user EOA** for **`approve` + `list`**.
+- If **`approve`** is blocked with **`unverified_contract`** / **"dangerous"** / **"malicious"** despite BaseScan + Sourcify verification: root cause is a **third-party risk index cold-start** (e.g. GoPlus) — no reputation yet for a newly deployed contract. Bankr's custodial signer blocks the tx as a safety measure. **Not** a contract bug.
+  - Workaround 1: **wait** and retry (index usually catches up in minutes–hours after verification push).
+  - Workaround 2: **escalate** to Bankr with verified BaseScan URL for manual whitelist.
+  - Workaround 3 (fastest): Bankr broadcasts **`safeTransferFrom(BFRR, custodialWallet → userEOA, tokenId)`** (NFT transfers typically not blocked), then user calls **`approve` + `list`** from their own wallet (MetaMask / Rabby / WalletConnect) with gas.
 
 ---
 
@@ -170,7 +173,7 @@ list(
 
 Returns / emits a **`listingId`** (see `Listed` on BaseScan). Tell the user to **save `listingId`** for buyers.
 
-**Cancel listing:** seller calls `cancel(listingId)` on the same marketplace — NFT returns to seller (does **not** burn BFRR; that is different from escrow `cancelRights`).
+**Cancel listing:** seller calls `cancel(listingId)` on the same marketplace — BFRR returns to seller wallet (does **not** burn BFRR; that is different from escrow `cancelRights`). **Fee rights are still escrowed** — to reclaim fee beneficiary status, seller must then call **`redeemRights(tokenId)`** on **`BankrEscrowV3`** (burns BFRR, reinstates seller as beneficiary). If the seller only wants to re-list later, they can hold the BFRR and call `list` again without a new escrow cycle.
 
 ---
 

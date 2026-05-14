@@ -21,6 +21,10 @@ contract BankrEscrowV3 is Ownable, ReentrancyGuard {
 
     mapping(address feeManager => bool allowed) public allowedFeeManager;
 
+    /// @notice Human-readable factory label for each fee manager (e.g. "Bankr", "Clanker").
+    ///         Written into the receipt's on-chain SVG image at mint time.
+    mapping(address feeManager => string) public factoryNames;
+
     mapping(bytes32 poolId => address seller) public pendingSeller;
     mapping(bytes32 poolId => address feeManager) public pendingFeeManagerForPool;
     mapping(bytes32 poolId => address token0) public pendingToken0ForPool;
@@ -86,6 +90,14 @@ contract BankrEscrowV3 is Ownable, ReentrancyGuard {
         emit FeeManagerAllowlistUpdated(feeManager, allowed);
     }
 
+    /// @notice Sets the display name embedded in the on-chain NFT image for receipts
+    ///         minted by `feeManager` (e.g. "Bankr", "Clanker"). Can be updated any
+    ///         time; only affects future mints.
+    function setFactoryName(address feeManager, string calldata name) external onlyOwner {
+        if (feeManager == address(0)) revert ZeroAddress();
+        factoryNames[feeManager] = name;
+    }
+
     function prepareDeposit(address feeManager, bytes32 poolId, address token0, address token1) external nonReentrant {
         if (feeManager == address(0) || token0 == address(0) || token1 == address(0)) revert ZeroAddress();
         if (token0 == token1) revert DuplicateTokenAddress(token0);
@@ -131,7 +143,8 @@ contract BankrEscrowV3 is Ownable, ReentrancyGuard {
             poolId: poolId,
             token0: token0ForPool[poolId],
             token1: token1ForPool[poolId],
-            seller: seller
+            seller: seller,
+            factoryName: factoryNames[feeManager]
         });
         receipt.mint(seller, tokenId, position);
 

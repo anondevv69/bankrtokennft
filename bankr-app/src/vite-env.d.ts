@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_CHAIN_ID?: string;
   /** Optional — enables WalletConnect QR (e.g. mobile wallet). Project id from https://cloud.reown.com/ */
   readonly VITE_WALLETCONNECT_PROJECT_ID?: string;
+  /** Same as VITE_WALLETCONNECT_PROJECT_ID (alias for Reown dashboard id). */
+  readonly VITE_REOWN_PROJECT_ID?: string;
   /** Optional — `getLogs` depth when scanning Transfer events to find token IDs (max 500000). */
   readonly VITE_RECEIPT_SCAN_BLOCKS?: string;
 }

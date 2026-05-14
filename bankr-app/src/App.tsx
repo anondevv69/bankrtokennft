@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useConnect,
@@ -10,634 +10,674 @@ import {
   useChainId,
   useSwitchChain,
 } from "wagmi";
-import { isAddress, parseAbiItem, parseEther, formatEther, getAddress, type Address } from "viem";
+import type { PublicClient } from "viem";
+import {
+  isAddress,
+  parseAbiItem,
+  parseEther,
+  formatEther,
+  getAddress,
+  type Address,
+} from "viem";
 import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
+import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
+import { walletConnectConfigured } from "./wagmi";
 
-const erc721BalanceAbi = [
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "owner", type: "address" }],
-    outputs: [{ type: "uint256" }],
-  },
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const ESCROW_ADDRESS: Address = "0x9CFD0AF884791b7c4BCC77f987bf0fa89b2064cB";
+const GETLOGS_MAX_BLOCK_SPAN = 10_000n;
+const MAX_LISTING_IDS_TO_SCAN = 250n;
+const DEFAULT_SCAN_BLOCKS = 80_000n;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function tryParseAddress(raw: string): Address | undefined {
+  const t = raw.trim();
+  if (!t || !isAddress(t, { strict: false })) return undefined;
+  try { return getAddress(t); } catch { return undefined; }
+}
+
+function envAddr(name: string): string {
+  const raw = (import.meta as ImportMeta).env[name];
+  return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
+}
+
+function shortAddr(addr: string) {
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+
+
+function parseNftImage(tokenUri: unknown): string | null {
+  if (!tokenUri || typeof tokenUri !== "string") return null;
+  try {
+    const b64 = tokenUri.replace("data:application/json;base64,", "");
+    const json = JSON.parse(atob(b64)) as { image?: string };
+    return json.image ?? null;
+  } catch { return null; }
+}
+
+// ── ABIs (minimal inline) ────────────────────────────────────────────────────
+
+const erc721Abi = [
+  { type: "function", name: "approve", stateMutability: "nonpayable",
+    inputs: [{ name: "to", type: "address" }, { name: "tokenId", type: "uint256" }], outputs: [] },
+  { type: "function", name: "getApproved", stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ type: "address" }] },
+  { type: "function", name: "isApprovedForAll", stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }, { name: "operator", type: "address" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "balanceOf", stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "ownerOf", stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }], outputs: [{ type: "address" }] },
+] as const;
+
+const escrowAbi = [
+  { type: "function", name: "redeemRights", stateMutability: "nonpayable",
+    inputs: [{ name: "tokenId", type: "uint256" }], outputs: [] },
 ] as const;
 
 const transferEvent = parseAbiItem(
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
 );
 
-const erc721Abi = [
-  {
-    type: "function",
-    name: "approve",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "to", type: "address" },
-      { name: "tokenId", type: "uint256" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "setApprovalForAll",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "operator", type: "address" },
-      { name: "approved", type: "bool" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "getApproved",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "address" }],
-  },
-  {
-    type: "function",
-    name: "isApprovedForAll",
-    stateMutability: "view",
-    inputs: [
-      { name: "owner", type: "address" },
-      { name: "operator", type: "address" },
-    ],
-    outputs: [{ type: "bool" }],
-  },
-] as const;
+// ── Log chunker ──────────────────────────────────────────────────────────────
 
-function envAddr(name: string): string {
-  const raw = (import.meta as ImportMeta).env[name];
-  if (typeof raw === "string" && isAddress(raw)) return raw;
-  return "";
+async function getTransferLogsChunked(
+  client: PublicClient,
+  { collection, recipient, fromBlock, toBlock }: {
+    collection: Address; recipient: Address; fromBlock: bigint; toBlock: bigint;
+  },
+) {
+  const out = [];
+  let start = fromBlock;
+  while (start <= toBlock) {
+    const end = start + GETLOGS_MAX_BLOCK_SPAN - 1n <= toBlock
+      ? start + GETLOGS_MAX_BLOCK_SPAN - 1n : toBlock;
+    const chunk = await client.getLogs({
+      address: collection, event: transferEvent,
+      args: { to: recipient }, fromBlock: start, toBlock: end,
+    });
+    out.push(...chunk);
+    start = end + 1n;
+  }
+  return out;
 }
 
-function hasPinnedContractsFromEnv(): boolean {
-  return Boolean(envAddr("VITE_MARKETPLACE_ADDRESS") && envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
+// ── Listing fetcher ──────────────────────────────────────────────────────────
+
+type ActiveListing = {
+  listingId: bigint; collection: Address; tokenId: bigint;
+  seller: string; priceWei: bigint; active: boolean;
+};
+
+async function fetchActiveListings(
+  client: PublicClient, marketplace: Address, nextId: bigint,
+): Promise<ActiveListing[]> {
+  if (nextId <= 1n) return [];
+  const maxId = nextId - 1n;
+  const limit = maxId > MAX_LISTING_IDS_TO_SCAN ? MAX_LISTING_IDS_TO_SCAN : maxId;
+  const out: ActiveListing[] = [];
+  const BATCH = 28;
+  let start = 1n;
+  while (start <= limit) {
+    const calls: { address: Address; abi: typeof feeRightsFixedSaleAbi; functionName: "getListing"; args: readonly [bigint] }[] = [];
+    let id = start, n = 0;
+    while (n < BATCH && id <= limit) { calls.push({ address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "getListing", args: [id] }); id++; n++; }
+    const res = await client.multicall({ contracts: calls, allowFailure: true });
+    for (let i = 0; i < res.length; i++) {
+      const r = res[i]!;
+      if (r.status !== "success") continue;
+      const li = r.result as { collection: Address; tokenId: bigint; seller: string; priceWei: bigint; active: boolean };
+      if (li.active) out.push({ listingId: start + BigInt(i), ...li });
+    }
+    start += BigInt(calls.length);
+  }
+  return out;
 }
+
+// ── BfrrCard ─────────────────────────────────────────────────────────────────
+
+function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick }: {
+  tokenId: string; collection: Address; selected: boolean;
+  wrongNetwork: boolean; onClick: () => void;
+}) {
+  const tid = useMemo(() => { try { return BigInt(id); } catch { return null; } }, [id]);
+
+  const { data: rawUri } = useReadContract({
+    address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "tokenURI",
+    args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: tid !== null && !wrongNetwork },
+  });
+  const { data: serial } = useReadContract({
+    address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "serialOf",
+    args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: tid !== null && !wrongNetwork },
+  });
+
+  const imgSrc = useMemo(() => parseNftImage(rawUri), [rawUri]);
+
+  return (
+    <button type="button" className={`bfrr-card${selected ? " active" : ""}`} onClick={onClick}>
+      {imgSrc ? (
+        <img className="bfrr-card__img" src={imgSrc}
+          alt={serial !== undefined ? `BFRR #${String(serial)}` : "BFRR"} />
+      ) : (
+        <div className="bfrr-card__img-placeholder">
+          <span className="bfrr-card__badge">BFRR</span>
+          {serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>}
+        </div>
+      )}
+      <div className="bfrr-card__footer">
+        <div className="bfrr-card__id" title={id}>
+          {serial !== undefined ? `#${String(serial)}` : id.slice(0, 6) + "…" + id.slice(-4)}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ── ListingCard ───────────────────────────────────────────────────────────────
+
+function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork, onBuy, onCancel }: {
+  li: ActiveListing; bfrr: Address | undefined; address: Address | undefined;
+  txDisabled: boolean; isConnected: boolean; wrongNetwork: boolean;
+  onBuy: () => void; onCancel: () => void;
+}) {
+  const isBfrr = bfrr !== undefined && getAddress(li.collection) === getAddress(bfrr);
+
+  const { data: rawUri } = useReadContract({
+    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    functionName: "tokenURI", args: [li.tokenId], chainId: MVP_CHAIN_ID,
+    query: { enabled: isBfrr && !wrongNetwork },
+  });
+  const { data: serial } = useReadContract({
+    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    functionName: "serialOf", args: [li.tokenId], chainId: MVP_CHAIN_ID,
+    query: { enabled: isBfrr && !wrongNetwork },
+  });
+
+  const imgSrc = useMemo(() => parseNftImage(rawUri), [rawUri]);
+  const imSeller = address !== undefined && isAddress(li.seller) &&
+    getAddress(li.seller) === getAddress(address);
+
+  return (
+    <div className="listing-card">
+      {imgSrc ? (
+        <img className="listing-card__img" src={imgSrc}
+          alt={serial !== undefined ? `BFRR #${String(serial)}` : "BFRR"} />
+      ) : (
+        <div className="listing-card__img-placeholder">
+          <span className="bfrr-card__badge">BFRR</span>
+          {serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>}
+        </div>
+      )}
+      <div className="listing-card__body">
+        <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
+        <div className="listing-card__meta">
+          <div className="listing-card__meta-row">
+            <span>Seller</span>
+            <span className="mono">{shortAddr(li.seller)}</span>
+          </div>
+          <div className="listing-card__meta-row">
+            <span>Token</span>
+            <span className="mono">{serial !== undefined ? `#${String(serial)}` : shortAddr(li.tokenId.toString())}</span>
+          </div>
+        </div>
+        <div className="listing-card__actions">
+          {imSeller ? (
+            <button type="button" className="btn btn-danger btn-sm btn-full"
+              disabled={txDisabled} onClick={onCancel}>
+              Cancel listing
+            </button>
+          ) : (
+            <button type="button" className="btn btn-primary btn-full"
+              disabled={!isConnected || txDisabled}
+              title={!isConnected ? "Connect wallet to buy" : undefined}
+              onClick={onBuy}>
+              Buy · {formatEther(li.priceWei)} ETH
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SellPanel ────────────────────────────────────────────────────────────────
+
+function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
+  wrongNetwork, isConnected, onDone }: {
+  tokenIdStr: string; collection: Address; marketplace: Address;
+  address: Address | undefined; txDisabled: boolean;
+  wrongNetwork: boolean; isConnected: boolean; onDone: () => void;
+}) {
+  const [price, setPrice] = useState("0.01");
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const tokenId = useMemo(() => { try { return BigInt(tokenIdStr); } catch { return null; } }, [tokenIdStr]);
+  const enabled = !wrongNetwork && !txDisabled && tokenId !== null;
+
+  const { data: approvedSpender } = useReadContract({
+    address: collection, abi: erc721Abi, functionName: "getApproved",
+    args: tokenId !== null ? [tokenId] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: enabled && isConnected },
+  });
+  const { data: approvedAll } = useReadContract({
+    address: collection, abi: erc721Abi, functionName: "isApprovedForAll",
+    args: address ? [address, marketplace] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: enabled && Boolean(address) },
+  });
+  const { data: bfrrOwner } = useReadContract({
+    address: collection, abi: erc721Abi, functionName: "ownerOf",
+    args: tokenId !== null ? [tokenId] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: enabled },
+  });
+
+  const canPull = Boolean(
+    (typeof approvedSpender === "string" && isAddress(approvedSpender) &&
+     getAddress(approvedSpender as Address) === getAddress(marketplace)) ||
+    approvedAll === true
+  );
+  const isBfrrOwner = address !== undefined && typeof bfrrOwner === "string" &&
+    isAddress(bfrrOwner) && getAddress(bfrrOwner as Address) === getAddress(address);
+  const priceNorm = price.trim().replace(",", ".");
+  const priceOk = Number.isFinite(parseFloat(priceNorm)) && parseFloat(priceNorm) > 0;
+
+  const run = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* surfaced by writeError */ } };
+
+  return (
+    <div className="sell-panel">
+      <div className="sell-panel__title">
+        Sell
+        <span className="tag mono">{tokenIdStr.slice(0, 6)}…{tokenIdStr.slice(-4)}</span>
+        <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }}
+          onClick={onDone}>✕</button>
+      </div>
+
+      {/* Price + list */}
+      <div className="sell-row">
+        <label>Price</label>
+        <div className="price-wrap">
+          <input value={price} onChange={e => setPrice(e.target.value)} placeholder="0.01" />
+          <span className="price-suffix">ETH</span>
+        </div>
+      </div>
+
+      <div className="sell-actions">
+        {canPull ? (
+          <span className="approved-tag">✓ Approved</span>
+        ) : (
+          <button type="button" className="btn btn-ghost"
+            disabled={txDisabled || tokenId === null}
+            onClick={() => run(async () => {
+              await writeContractAsync({
+                address: collection, abi: erc721Abi, functionName: "approve",
+                args: [marketplace, tokenId!], chainId: MVP_CHAIN_ID,
+              });
+            })}>
+            {isPending ? <><span className="spinner" />Wallet…</> : "1. Approve"}
+          </button>
+        )}
+        <button type="button" className="btn btn-primary"
+          disabled={txDisabled || !canPull || !priceOk || tokenId === null}
+          onClick={() => run(async () => {
+            await writeContractAsync({
+              address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "list",
+              args: [collection, tokenId!, parseEther(priceNorm)], chainId: MVP_CHAIN_ID,
+            });
+            onDone();
+          })}>
+          {isPending ? <><span className="spinner" />Wallet…</> : `${canPull ? "" : "2. "}List`}
+        </button>
+      </div>
+
+      {/* Redeem rights */}
+      <div className="redeem-row">
+        <div className="redeem-label">
+          <span>Redeem fee rights</span>
+          <strong>
+            {bfrrOwner ? (isBfrrOwner ? "You hold this BFRR" : `Held by ${shortAddr(bfrrOwner as string)}`) : "…"}
+          </strong>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm"
+          disabled={txDisabled || !isBfrrOwner || tokenId === null}
+          title={!isBfrrOwner ? "Connect the wallet that holds this BFRR" : "Burns BFRR → you become fee beneficiary"}
+          onClick={() => run(async () => {
+            await writeContractAsync({
+              address: ESCROW_ADDRESS, abi: escrowAbi, functionName: "redeemRights",
+              args: [tokenId!], chainId: MVP_CHAIN_ID,
+            });
+          })}>
+          {isPending ? <><span className="spinner" />…</> : "Redeem"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Settings sheet ───────────────────────────────────────────────────────────
+
+function SettingsSheet({ mpInput, setMpInput, colInput, setColInput, onClose }: {
+  mpInput: string; setMpInput: (v: string) => void;
+  colInput: string; setColInput: (v: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-sheet" onClick={e => e.stopPropagation()}>
+        <div className="settings-sheet__head">
+          <h3>Contract addresses</h3>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="settings-field">
+          <label>Marketplace (FeeRightsFixedSale)</label>
+          <input value={mpInput} onChange={e => setMpInput(e.target.value)}
+            placeholder="0xeb8aC71B…" />
+        </div>
+        <div className="settings-field">
+          <label>BFRR receipt NFT</label>
+          <input value={colInput} onChange={e => setColInput(e.target.value)}
+            placeholder="0x4eC1a255…" />
+        </div>
+        <p className="muted" style={{ marginTop: "0.5rem" }}>
+          Pre-filled from build config. Only change if using a different deployment.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { connect, connectors, isPending: connectPending, variables: connectVariables } = useConnect();
+  const { connect, connectors, isPending: connectPending, variables: connectVars } = useConnect();
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: switchPending } = useSwitchChain();
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
   const publicClient = usePublicClient();
 
-  const [mpInput, setMpInput] = useState(envAddr("VITE_MARKETPLACE_ADDRESS"));
+  const [mpInput, setMpInput]   = useState(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const [colInput, setColInput] = useState(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
-  const [tokenIdStr, setTokenIdStr] = useState("");
-  const [scanLoading, setScanLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
   const [scannedIds, setScannedIds] = useState<string[]>([]);
+  const [manualIds, setManualIds] = useState<string[]>([]);
+  const [pasteId, setPasteId] = useState("");
+  const [scanning, setScanning] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
 
-  const [offerEth, setOfferEth] = useState("0.01");
-  const [listPriceEth, setListPriceEth] = useState("1");
-  const [listingIdStr, setListingIdStr] = useState("1");
-  const [buyPriceEth, setBuyPriceEth] = useState("1");
-  const [acceptBidder, setAcceptBidder] = useState("");
-
-  const marketplaceAddr = mpInput.trim();
-  const collectionAddr = colInput.trim();
-  const marketplaceOk = isAddress(marketplaceAddr);
-  const collectionOk = isAddress(collectionAddr);
-  const marketplace = marketplaceOk ? (marketplaceAddr as Address) : undefined;
-  const collection = collectionOk ? (collectionAddr as Address) : undefined;
-
-  const tokenId = useMemo(() => {
-    const t = tokenIdStr.trim();
-    if (!t) return null;
-    try {
-      return BigInt(t);
-    } catch {
-      return null;
-    }
-  }, [tokenIdStr]);
-
-  const readsEnabled = Boolean(marketplace && collection && tokenId !== null);
-
+  const marketplace = tryParseAddress(mpInput);
+  const collection  = tryParseAddress(colInput);
   const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
+  const txDisabled  = !isConnected || writePending || wrongNetwork;
 
   const scanBlockSpan = useMemo(() => {
     const raw = (import.meta as ImportMeta).env.VITE_RECEIPT_SCAN_BLOCKS;
     const n = typeof raw === "string" ? parseInt(raw, 10) : NaN;
-    if (Number.isFinite(n) && n > 0) return BigInt(Math.min(n, 500_000));
-    return 80_000n;
+    return Number.isFinite(n) && n > 0 ? BigInt(Math.min(n, 500_000)) : DEFAULT_SCAN_BLOCKS;
   }, []);
 
-  const { data: totalOffersWei } = useReadContract({
-    address: readsEnabled ? marketplace : undefined,
-    abi: feeRightsFixedSaleAbi,
-    functionName: "totalOfferWei",
-    args: readsEnabled && tokenId !== null ? [collection!, tokenId] : undefined,
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: readsEnabled && !wrongNetwork },
-  });
+  const allTokenIds = useMemo(() => {
+    const set = new Set([...scannedIds, ...manualIds]);
+    return [...set].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
+  }, [scannedIds, manualIds]);
 
-  const { data: myReceiptBalance } = useReadContract({
-    address: collection,
-    abi: erc721BalanceAbi,
-    functionName: "balanceOf",
-    args: address ? [address] : undefined,
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: Boolean(collectionOk && collection && address && isConnected) },
-  });
-
-  const { data: myOfferWei } = useReadContract({
-    address: readsEnabled ? marketplace : undefined,
-    abi: feeRightsFixedSaleAbi,
-    functionName: "offerWei",
-    args: readsEnabled && tokenId !== null && address ? [collection!, tokenId, address] : undefined,
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: readsEnabled && Boolean(address) && !wrongNetwork },
-  });
-
-  const { data: approvedSpender } = useReadContract({
-    address: readsEnabled ? collection : undefined,
-    abi: erc721Abi,
-    functionName: "getApproved",
-    args: readsEnabled && tokenId !== null ? [tokenId] : undefined,
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: readsEnabled && tokenId !== null && !wrongNetwork },
-  });
-
-  const { data: approvedForAll } = useReadContract({
-    address: readsEnabled ? collection : undefined,
-    abi: erc721Abi,
-    functionName: "isApprovedForAll",
-    args: readsEnabled && address && marketplace ? [address, marketplace] : undefined,
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: readsEnabled && Boolean(address) && Boolean(marketplace) && !wrongNetwork },
-  });
-
-  const invalidate = () => {
-    void queryClient.invalidateQueries();
-  };
-
-  const scanTransfersToWallet = async () => {
-    if (!publicClient || !collection || !address || !collectionOk) return;
-    setScanErr(null);
+  // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
+  useEffect(() => {
+    if (!isConnected || !address || !collection || !publicClient || wrongNetwork) return;
     setScannedIds([]);
-    setScanLoading(true);
-    try {
-      const latest = await publicClient.getBlockNumber();
-      const span = scanBlockSpan;
-      const fromBlock = latest > span ? latest - span : 0n;
-      const logs = await publicClient.getLogs({
-        address: collection,
-        event: transferEvent,
-        args: { to: address },
-        fromBlock,
-        toBlock: latest,
-      });
-      const rawIds = logs.map((l) => l.args.tokenId).filter((t): t is bigint => typeof t === "bigint");
-      const uniq = [...new Set(rawIds.map((x) => x.toString()))].sort((a, b) =>
-        BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0,
-      );
-      setScannedIds(uniq);
-    } catch (e) {
-      setScanErr(
-        e instanceof Error
-          ? e.message
-          : "Scan failed — public RPCs often cap `getLogs` range; set `VITE_RPC_URL` to a paid Base endpoint.",
-      );
-    } finally {
-      setScanLoading(false);
-    }
-  };
+    setManualIds([]);
+    setSelectedId(null);
+    setScanErr(null);
+    setScanning(true);
+    (async () => {
+      try {
+        const latest = await publicClient.getBlockNumber();
+        const from = latest > scanBlockSpan ? latest - scanBlockSpan : 0n;
+        const logs = await getTransferLogsChunked(publicClient, {
+          collection, recipient: getAddress(address), fromBlock: from, toBlock: latest,
+        });
+        const ids = [...new Set(
+          logs.map(l => l.args.tokenId).filter((t): t is bigint => typeof t === "bigint")
+            .map(x => x.toString())
+        )];
+        setScannedIds(ids);
+      } catch (e) {
+        setScanErr(
+          e instanceof Error ? e.message : "Could not scan transfers — check RPC or try pasting your token ID below.",
+        );
+      } finally { setScanning(false); }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address, collection?.toLowerCase(), wrongNetwork]);
 
+  // Listings
+  const { data: nextListingId } = useReadContract({
+    address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "nextListingId",
+    chainId: MVP_CHAIN_ID, query: { enabled: Boolean(marketplace && !wrongNetwork) },
+  });
+
+  const { data: activeListings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
+    queryKey: ["listings", marketplace, (nextListingId ?? 0n).toString()],
+    queryFn: async () => {
+      if (!publicClient || !marketplace || nextListingId === undefined) return [];
+      return fetchActiveListings(publicClient, marketplace, nextListingId as bigint);
+    },
+    enabled: Boolean(publicClient && marketplace && nextListingId !== undefined && !wrongNetwork),
+    staleTime: 12_000,
+  });
+
+  const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      invalidate();
-    } catch {
-      /* surfaced via writeError / wallet */
-    }
+    try { await fn(); invalidate(); } catch { /* surfaced via writeError */ }
   };
-
-  const txDisabled = !isConnected || writePending || wrongNetwork;
-
-  const singleTokenApproved =
-    readsEnabled &&
-    tokenId !== null &&
-    marketplace &&
-    typeof approvedSpender === "string" &&
-    isAddress(approvedSpender) &&
-    getAddress(approvedSpender as Address) === getAddress(marketplace);
-
-  const operatorForAll = approvedForAll === true;
-
-  const canMarketplacePullToken = Boolean(readsEnabled && (singleTokenApproved || operatorForAll));
 
   return (
-    <>
-      <div className="mvp-banner" role="status">
-        <div className="mvp-banner__line1">Bankr MVP — Base mainnet only</div>
-        <div className="mvp-banner__line2">Real assets · experimental UI · use at your own risk</div>
-      </div>
-
-      <h1>Bankr sale</h1>
-      <p className="sub">
-        This is a <strong>local dev console</strong> for the on-chain marketplace — not the in-Bankr Marketplace UI (that
-        app reads Bankr APIs to show &quot;eligible&quot; launches). Here you paste contract addresses and token id, or
-        scan recent transfers below.
-      </p>
-
-      <div className="panel quick-path-callout">
-        <h2>Already minted BFRR? Skip the Bankr wizard</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          In Bankr Marketplace <strong>v1.62</strong>, <em>Sell Rights + List</em> still runs the full escrow → beneficiary →
-          mint → list orchestration — that UI is <strong>not in this repo</strong>, so we cannot change that modal from
-          GitHub. Ask Bankr for a <strong>&quot;List only&quot;</strong> shortcut when the wallet already holds BFRR (copy in{" "}
-          <code className="mono">skills/.../dm-intents.md</code> and <code className="mono">LAUNCH_CHECKLIST.md</code> item
-          7). On <strong>this page</strong>: enter <strong>token ID</strong> + <strong>list price (ETH)</strong> in the first
-          panel, then <strong>Approve</strong> → <strong>List</strong> below — no escrow steps.
-        </p>
-      </div>
-
-      {hasPinnedContractsFromEnv() && (
-        <p className="muted" style={{ marginTop: "-0.5rem", fontSize: "0.85rem" }}>
-          Railway build has <code className="mono">VITE_*</code> addresses — marketplace + BFRR fields are prefilled.
-        </p>
-      )}
-
-      <div className="panel">
-        <h2>Wallet</h2>
-        {!isConnected ? (
-          <div className="wallet-pick">
-            <p className="muted" style={{ marginTop: 0 }}>
-              Choose which extension or app signs txs. Same browser always reconnecting the same address?{" "}
-              <strong>Disconnect</strong>, then in MetaMask (or your wallet) use the <strong>account switcher</strong>, then
-              connect again. Optional: set <code className="mono">VITE_WALLETCONNECT_PROJECT_ID</code> in{" "}
-              <code className="mono">.env</code> for a WalletConnect QR (mobile wallets).
-            </p>
-            <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "0.75rem" }}>
-              {connectors.map((connector) => (
-                <button
-                  key={connector.uid}
-                  type="button"
-                  className="primary"
-                  disabled={connectPending}
-                  onClick={() => connect({ connector, chainId: MVP_CHAIN_ID })}
-                >
-                  {connectPending && connectVariables?.connector?.uid === connector.uid
-                    ? "Connecting…"
-                    : connector.name}
-                </button>
-              ))}
+    <div>
+      {/* ── Nav ── */}
+      <nav className="nav">
+        <div className="nav-logo">Bankr <span>Sale</span></div>
+        <div className="nav-right">
+          {isConnected && address ? (
+            <>
+              <div className="wallet-pill">
+                <span className="wallet-dot" />
+                <span className="wallet-addr">{shortAddr(address)}</span>
+                <button className="gear-btn" onClick={() => disconnect()} title="Disconnect">✕</button>
+              </div>
+            </>
+          ) : (
+            <div className="connect-strip">
+              {connectors.map((c, i) => {
+                const label = typeof c === "object" && "name" in c ? String((c as { name: string }).name) : "Wallet";
+                const uid = typeof c === "object" && "uid" in c ? (c as { uid: string }).uid : null;
+                const cvUid = typeof connectVars?.connector === "object" && connectVars.connector !== null && "uid" in connectVars.connector
+                  ? (connectVars.connector as { uid: string }).uid : null;
+                const busy = connectPending && uid && cvUid && uid === cvUid;
+                return (
+                  <button key={`${i}-${label}`} type="button" className="btn btn-ghost btn-sm"
+                    disabled={connectPending}
+                    onClick={() => connect({ connector: c, chainId: MVP_CHAIN_ID })}>
+                    {busy ? "…" : label}
+                  </button>
+                );
+              })}
             </div>
-          </div>
-        ) : (
-          <div className="row">
-            <span className="mono muted">{address}</span>
-            <span className="muted">· chain {chainId}</span>
-            <button type="button" onClick={() => disconnect()}>
-              Disconnect
-            </button>
-          </div>
-        )}
-      </div>
+          )}
+          <button className="gear-btn" title="Settings" onClick={() => setShowSettings(v => !v)}>⚙</button>
+        </div>
+      </nav>
 
+      {/* ── Network warning ── */}
       {wrongNetwork && (
-        <div className="panel chain-gate">
-          <h2>Wrong network</h2>
-          <p className="err" style={{ marginTop: 0 }}>
-            This app only works on <strong>Base</strong> mainnet (chain id {MVP_CHAIN_ID}). Switch in your wallet to
-            continue — transactions are blocked here on other networks.
-          </p>
-          <button
-            type="button"
-            className="primary"
-            disabled={switchPending}
-            onClick={() => switchChain?.({ chainId: MVP_CHAIN_ID })}
-          >
-            {switchPending ? "Switching…" : "Switch to Base"}
+        <div className="network-banner">
+          <span>Switch to Base mainnet</span>
+          <button className="btn btn-ghost btn-sm" disabled={switchPending}
+            onClick={() => switchChain?.({ chainId: MVP_CHAIN_ID })}>
+            {switchPending ? "Switching…" : "Switch"}
           </button>
         </div>
       )}
 
-      <>
-        <div className="panel">
-          <h2>List a receipt — token, price, then on-chain steps</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Enter <strong>token ID</strong> and <strong>list price</strong> first (same flow as &quot;amount then
-            sale&quot;). Contract addresses stay editable; switch wallet to Base before signing.
+      {/* ── Hero ── */}
+      <div className="hero">
+        <h1>Fee Rights <span>Marketplace</span></h1>
+        <p>Buy and sell Bankr fee rights receipts on Base.</p>
+      </div>
+
+      {/* ── Your BFRRs ── */}
+      {isConnected && !wrongNetwork && collection && (
+        <section>
+          <div className="section-head">
+            <h2>Your BFRRs</h2>
+            <span className="scan-status">
+              {scanning ? <><span className="spinner" />Scanning…</> : `${allTokenIds.length} shown`}
+            </span>
+          </div>
+
+          <p className="muted" style={{ margin: "-0.5rem 0 1rem", fontSize: "0.8rem", lineHeight: 1.45 }}>
+            Only tokens <strong>in this connected wallet</strong> on Base appear here. Custodial Bankr balances use a
+            different address — connect that wallet, or paste the token ID from BaseScan.
           </p>
-          <label htmlFor="mp">Marketplace contract</label>
-            <input
-              id="mp"
-              placeholder="FeeRightsFixedSale 0x…"
-              value={mpInput}
-              onChange={(e) => setMpInput(e.target.value)}
-            />
-            <label htmlFor="col">Receipt NFT contract</label>
-            <input
-              id="col"
-              placeholder="BankrFeeRightsReceipt 0x…"
-              value={colInput}
-              onChange={(e) => setColInput(e.target.value)}
-            />
-            <label htmlFor="tid">Token ID</label>
-            <input
-              id="tid"
-              placeholder="Full uint256 from escrow.tokenIdFor(…)"
-              value={tokenIdStr}
-              onChange={(e) => setTokenIdStr(e.target.value)}
-            />
-            <label htmlFor="lp">Your list price (ETH)</label>
-            <input
-              id="lp"
-              placeholder="e.g. 0.0005"
-              value={listPriceEth}
-              onChange={(e) => setListPriceEth(e.target.value)}
-            />
-            {collectionOk && isConnected && address && (
-              <div className="readout" style={{ marginBottom: "0.85rem" }}>
-                <div>
-                  <span className="muted">BFRR balance for your wallet — </span>
-                  <strong>{String(myReceiptBalance ?? "…")}</strong>
-                  {wrongNetwork && (
-                    <span className="muted"> (reads still use Base RPC; switch wallet to Base to send txs)</span>
-                  )}
-                </div>
-                <div style={{ marginTop: "0.65rem", display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                  <a
-                    className="muted"
-                    style={{ color: "var(--accent)" }}
-                    href={`https://basescan.org/token/${collectionAddr}?a=${address}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open BaseScan inventory for this collection →
-                  </a>
-                </div>
-                <div style={{ marginTop: "0.65rem" }}>
-                  <button type="button" disabled={scanLoading} onClick={() => void scanTransfersToWallet()}>
-                    {scanLoading ? "Scanning logs…" : `Scan Transfer logs (last ~${scanBlockSpan} blocks)`}
-                  </button>
-                </div>
-                {scanErr && <p className="err" style={{ marginTop: "0.5rem", marginBottom: 0 }}>{scanErr}</p>}
-                {scannedIds.length > 0 && (
-                  <div style={{ marginTop: "0.65rem" }}>
-                    <span className="muted">Token IDs received in range (click to fill):</span>
-                    <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.2rem" }}>
-                      {scannedIds.map((id) => (
-                        <li key={id}>
-                          <button type="button" className="linkish" onClick={() => setTokenIdStr(id)}>
-                            {id}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-            {readsEnabled && tokenId !== null && (
-              <div className="readout">
-                <div>
-                  <span className="muted">Total ETH offered on this token — </span>
-                  <strong>{formatEther((totalOffersWei as bigint | undefined) ?? 0n)}</strong>
-                </div>
-                {address && (
-                  <div style={{ marginTop: "0.5rem" }}>
-                    <span className="muted">Your offer (locked) — </span>
-                    <strong>{formatEther((myOfferWei as bigint | undefined) ?? 0n)}</strong>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
 
-          <div className="panel">
-            <h2>Sell at a price — or cancel</h2>
-            <p className="muted" style={{ marginTop: 0 }}>
-              On-chain: you are either <strong>listed</strong> (BFRR held by the marketplace until someone buys or you
-              cancel) or <strong>not listed</strong> (you hold BFRR). Prefer <strong>approve this token only</strong> —
-              wallets often warn less than <code className="mono">setApprovalForAll</code> (entire collection).
+          {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
+
+          {!scanning && allTokenIds.length === 0 && (
+            <p className="empty">
+              No transfers to this address in the last {(Number(scanBlockSpan) / 1000).toFixed(0)}k blocks for this BFRR
+              contract.
             </p>
-            {readsEnabled && tokenId !== null && (
-              <p className="muted" style={{ marginTop: 0 }}>
-                Approval state:{" "}
-                {singleTokenApproved ? (
-                  <strong style={{ color: "var(--accent)" }}>this token → marketplace</strong>
-                ) : (
-                  <span>not single-token approved</span>
-                )}
-                {operatorForAll ? (
-                  <>
-                    {" "}
-                    · <strong style={{ color: "var(--banner-amber)" }}>operator for all</strong> (max privilege)
-                  </>
-                ) : null}
-              </p>
-            )}
-            <button
-              type="button"
-              className="primary"
-              disabled={txDisabled || !readsEnabled}
-              onClick={() =>
-                run(async () => {
-                  if (!readsEnabled || !collection || !marketplace || tokenId === null) return;
-                  await writeContractAsync({
-                    address: collection,
-                    abi: erc721Abi,
-                    functionName: "approve",
-                    args: [marketplace, tokenId],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Step 1 — Approve marketplace for this token only
-            </button>
-            <button
-              type="button"
-              style={{ marginTop: "0.5rem" }}
-              disabled={txDisabled || !readsEnabled}
-              onClick={() =>
-                run(async () => {
-                  if (!readsEnabled || !collection || !marketplace) return;
-                  await writeContractAsync({
-                    address: collection,
-                    abi: erc721Abi,
-                    functionName: "setApprovalForAll",
-                    args: [marketplace, true],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Optional — Approve marketplace for all tokens in this collection
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={txDisabled || !readsEnabled || !canMarketplacePullToken}
-              onClick={() =>
-                run(async () => {
-                  if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "list",
-                    args: [collection, tokenId, parseEther(listPriceEth)],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              List for sale
-            </button>
-            {!canMarketplacePullToken && readsEnabled && (
-              <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0 }}>
-                Complete Step 1 (single-token approve or optional collection-wide) before listing.
-              </p>
-            )}
-            <label htmlFor="lid" style={{ marginTop: "1rem" }}>
-              Listing ID (to cancel)
-            </label>
-            <input id="lid" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
-            <button
-              type="button"
-              className="danger"
-              disabled={txDisabled || !marketplaceOk}
-              onClick={() =>
-                run(async () => {
-                  if (!marketplace) return;
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "cancel",
-                    args: [BigInt(listingIdStr || "0")],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Cancel sale — I do not want to sell
-            </button>
-          </div>
+          )}
 
-          <div className="panel">
-            <h2>Offers — optional</h2>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Anyone can lock ETH as an offer even if you have not listed. You can accept an offer (sell to that
-              bidder) or do nothing. You cannot place new offers while your token is in an active fixed listing (use
-              cancel first if needed).
-            </p>
-            <label htmlFor="oe">Add to my offer (ETH)</label>
-            <input id="oe" value={offerEth} onChange={(e) => setOfferEth(e.target.value)} />
-            <button
-              type="button"
-              className="primary"
-              disabled={txDisabled || !readsEnabled}
-              onClick={() =>
-                run(async () => {
-                  if (!address || !readsEnabled || tokenId === null || !marketplace || !collection) return;
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "placeOffer",
-                    args: [collection, tokenId],
-                    value: parseEther(offerEth),
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Send offer
-            </button>
-            <button
-              type="button"
-              style={{ marginLeft: "0.5rem" }}
-              disabled={txDisabled || !readsEnabled}
-              onClick={() =>
-                run(async () => {
-                  if (!readsEnabled || tokenId === null || !marketplace || !collection) return;
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "withdrawOffer",
-                    args: [collection, tokenId],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Pull back my offer
-            </button>
-            <label htmlFor="bidder" style={{ marginTop: "1rem" }}>
-              Seller: accept this bidder&apos;s address
-            </label>
+          <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
             <input
-              id="bidder"
-              placeholder="0x…"
-              value={acceptBidder}
-              onChange={(e) => setAcceptBidder(e.target.value)}
+              className="mono"
+              style={{ flex: "1 1 200px", minWidth: 0 }}
+              placeholder="Paste full token ID (uint256)"
+              value={pasteId}
+              onChange={(e) => setPasteId(e.target.value)}
+              spellCheck={false}
             />
             <button
               type="button"
-              className="primary"
-              disabled={txDisabled || !readsEnabled || !isAddress(acceptBidder)}
-              onClick={() =>
-                run(async () => {
-                  if (!readsEnabled || tokenId === null || !marketplace || !collection || !isAddress(acceptBidder)) {
-                    return;
-                  }
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "acceptOffer",
-                    args: [collection, tokenId, acceptBidder as Address],
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                const t = pasteId.trim();
+                if (!t) return;
+                try {
+                  const id = BigInt(t).toString();
+                  setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+                  setSelectedId(id);
+                  setPasteId("");
+                } catch {
+                  /* invalid */
+                }
+              }}
             >
-              Accept offer — sell to them at their locked price
+              Add
             </button>
           </div>
 
-          <div className="panel">
-            <h2>Buy someone else&apos;s listing</h2>
-            <label htmlFor="lid2">Listing ID</label>
-            <input id="lid2" value={listingIdStr} onChange={(e) => setListingIdStr(e.target.value)} />
-            <label htmlFor="bpe">ETH (must match seller&apos;s price exactly)</label>
-            <input id="bpe" value={buyPriceEth} onChange={(e) => setBuyPriceEth(e.target.value)} />
-            <button
-              type="button"
-              className="primary"
-              disabled={txDisabled || !marketplaceOk}
-              onClick={() =>
-                run(async () => {
-                  if (!marketplace) return;
-                  await writeContractAsync({
-                    address: marketplace,
-                    abi: feeRightsFixedSaleAbi,
-                    functionName: "buy",
-                    args: [BigInt(listingIdStr || "0")],
-                    value: parseEther(buyPriceEth),
-                    chainId: MVP_CHAIN_ID,
-                  });
-                })
-              }
-            >
-              Buy
-            </button>
-          </div>
-        </>
+          {allTokenIds.length > 0 && (
+            <div className="bfrr-grid">
+              {allTokenIds.map((id) => (
+                <BfrrCard
+                  key={id}
+                  tokenId={id}
+                  collection={collection}
+                  selected={selectedId === id}
+                  wrongNetwork={wrongNetwork}
+                  onClick={() => setSelectedId((prev) => (prev === id ? null : id))}
+                />
+              ))}
+            </div>
+          )}
 
-      {writeError && <p className="err">{writeError.message}</p>}
+          {selectedId && marketplace && address && (
+            <SellPanel
+              tokenIdStr={selectedId}
+              collection={collection}
+              marketplace={marketplace}
+              address={address}
+              txDisabled={txDisabled}
+              wrongNetwork={wrongNetwork}
+              isConnected={isConnected}
+              onDone={() => {
+                setSelectedId(null);
+                invalidate();
+                refetchListings();
+              }}
+            />
+          )}
+        </section>
+      )}
 
-      <p className="muted" style={{ marginTop: "2rem" }}>
-        Escrow (mint receipt, redeem) is still <span className="mono">BankrEscrowV3</span> in the repo — this page is
-        only the sale / offer marketplace.
-      </p>
-    </>
+      {/* ── Marketplace listings ── */}
+      <section>
+        <div className="section-head">
+          <h2>Listings</h2>
+          <button type="button" className="btn btn-ghost btn-sm"
+            disabled={!marketplace || listingsLoading}
+            onClick={() => void refetchListings()}>
+            Refresh
+          </button>
+        </div>
+
+        {listingsLoading && <p className="empty"><span className="spinner" />Loading…</p>}
+
+        {!listingsLoading && (activeListings as ActiveListing[]).length === 0 && (
+          <p className="empty">{marketplace ? "No active listings." : "Configure the marketplace address in settings ⚙"}</p>
+        )}
+
+        <div className="listings-grid">
+          {(activeListings as ActiveListing[]).map(li => (
+            <ListingCard
+              key={li.listingId.toString()}
+              li={li} bfrr={collection} address={address}
+              txDisabled={txDisabled} isConnected={isConnected} wrongNetwork={wrongNetwork}
+              onBuy={() => run(async () => {
+                if (!marketplace) return;
+                await writeContractAsync({
+                  address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "buy",
+                  args: [li.listingId], value: li.priceWei, chainId: MVP_CHAIN_ID,
+                });
+              })}
+              onCancel={() => run(async () => {
+                if (!marketplace) return;
+                await writeContractAsync({
+                  address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "cancel",
+                  args: [li.listingId], chainId: MVP_CHAIN_ID,
+                });
+              })}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* ── Settings ── */}
+      {showSettings && (
+        <SettingsSheet mpInput={mpInput} setMpInput={setMpInput}
+          colInput={colInput} setColInput={setColInput}
+          onClose={() => setShowSettings(false)} />
+      )}
+
+      {/* ── Error bar ── */}
+      {writeError && (
+        <div className="error-bar">{writeError.message.slice(0, 120)}</div>
+      )}
+
+      {/* WalletConnect hint when not configured */}
+      {!isConnected && !walletConnectConfigured && (
+        <p className="muted" style={{ textAlign: "center", marginTop: "2rem", fontSize: "0.78rem" }}>
+          For mobile wallets add <span className="mono">VITE_REOWN_PROJECT_ID</span> from{" "}
+          <a href="https://cloud.reown.com/" target="_blank" rel="noreferrer">Reown Cloud</a>.
+        </p>
+      )}
+    </div>
   );
 }

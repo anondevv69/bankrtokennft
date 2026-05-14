@@ -5,30 +5,38 @@ import { MVP_CHAIN } from "./chain";
 /** Prefer a dedicated RPC in production (`VITE_RPC_URL`). Public endpoint is rate-limited. */
 const rpc = import.meta.env.VITE_RPC_URL ?? "https://mainnet.base.org";
 
-const wcProjectId =
-  typeof import.meta.env.VITE_WALLETCONNECT_PROJECT_ID === "string"
+/** Reown / WalletConnect Cloud project id (free). Either env name works. */
+const wcProjectIdRaw =
+  (typeof import.meta.env.VITE_WALLETCONNECT_PROJECT_ID === "string"
     ? import.meta.env.VITE_WALLETCONNECT_PROJECT_ID.trim()
-    : "";
+    : "") ||
+  (typeof import.meta.env.VITE_REOWN_PROJECT_ID === "string" ? import.meta.env.VITE_REOWN_PROJECT_ID.trim() : "");
 
-/** Multiple connectors so you can pick MetaMask vs Coinbase vs another injected wallet (Rabby, etc.). */
+/** `true` when WalletConnect (QR / mobile) is registered — requires a Cloud project id. */
+export const walletConnectConfigured = wcProjectIdRaw.length > 0;
+
+const walletConnectConnector = walletConnectConfigured
+  ? walletConnect({
+      projectId: wcProjectIdRaw,
+      metadata: {
+        name: "Bankr sale",
+        description: "Bankr fee rights — Base",
+        url: typeof window !== "undefined" ? window.location.origin : "https://localhost",
+        icons: [],
+      },
+      showQrModal: true,
+    })
+  : null;
+
+/**
+ * MetaMask and Coinbase first; WalletConnect next (QR / Trust / Rainbow / etc.); injected last
+ * (Rabby, Brave, other EIP-1193 wallets). WalletConnect only appears when `walletConnectConfigured`.
+ */
 const connectors = [
   metaMask(),
+  ...(walletConnectConnector ? [walletConnectConnector] : []),
   coinbaseWallet({ appName: "Bankr sale" }),
-  ...(wcProjectId
-    ? [
-        walletConnect({
-          projectId: wcProjectId,
-          metadata: {
-            name: "Bankr sale",
-            description: "Bankr fee rights — Base",
-            url: typeof window !== "undefined" ? window.location.origin : "https://localhost",
-            icons: [],
-          },
-          showQrModal: true,
-        }),
-      ]
-    : []),
-  injected(),
+  injected({ shimDisconnect: true }),
 ];
 
 /** Single-chain MVP: Base (8453) only. */

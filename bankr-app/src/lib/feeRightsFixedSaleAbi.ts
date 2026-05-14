@@ -1,4 +1,43 @@
 export const feeRightsFixedSaleAbi = [
+  // ── Constructor ──────────────────────────────────────────────────────────
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "feeRecipient_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  // ── View functions ───────────────────────────────────────────────────────
+  {
+    "type": "function",
+    "name": "FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "feeRecipient",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
   {
     "type": "function",
     "name": "acceptOffer",
@@ -225,6 +264,7 @@ export const feeRightsFixedSaleAbi = [
     "outputs": [],
     "stateMutability": "nonpayable"
   },
+  // ── Events ───────────────────────────────────────────────────────────────
   {
     "type": "event",
     "name": "Listed",
@@ -292,6 +332,12 @@ export const feeRightsFixedSaleAbi = [
       },
       {
         "name": "priceWei",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "platformFee",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -431,10 +477,17 @@ export const feeRightsFixedSaleAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      },
+      {
+        "name": "platformFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
   },
+  // ── Errors ───────────────────────────────────────────────────────────────
   {
     "type": "error",
     "name": "AlreadyListed",
