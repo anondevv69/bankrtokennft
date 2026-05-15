@@ -1226,6 +1226,70 @@ input::placeholder { color: var(--muted); }
   padding-top: 0.65rem;
 }
 
+.listing-card__opensea {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+/* ── OpenSea badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.15em 0.5em;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.badge--opensea {
+  background: #2081e2;
+  color: #fff;
+}
+
+/* ── Wallet NFT OpenSea row ── */
+.os-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.3rem 0 0.1rem;
+  font-size: 0.78rem;
+}
+
+/* ── OpenSea cross-listing card ── */
+.opensea-card {
+  background: var(--surface, #18181b);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.opensea-card .listing-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.opensea-card .listing-card__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.opensea-card .listing-card__price {
+  font-size: 1rem;
+}
+.opensea-card .listing-card__seller {
+  font-size: 0.72rem;
+  margin: 0;
+}
+
 /* ── Settings drawer ── */
 .settings-overlay {
   position: fixed;

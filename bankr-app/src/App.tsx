@@ -68,6 +68,13 @@ import {
   waitForMarketplaceApproval,
 } from "./listingFlow";
 import { bfrrReceiptPreviewDataUri } from "./bfrrPreviewSvg";
+import {
+  fetchOpenSeaCollectionListings,
+  indexListingsByTokenId,
+  openSeaAssetUrl,
+  openSeaCollectionUrl,
+  type OpenSeaListing,
+} from "./lib/openSeaListings";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -1120,10 +1127,11 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
 
 // ── ListingCard ───────────────────────────────────────────────────────────────
 
-function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork, onBuy, onCancel }: {
+function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork, onBuy, onCancel, openSeaListing, openSeaUrl }: {
   li: ActiveListing; bfrr: Address | undefined; address: Address | undefined;
   txDisabled: boolean; isConnected: boolean; wrongNetwork: boolean;
   onBuy: () => void; onCancel: () => void;
+  openSeaListing?: OpenSeaListing; openSeaUrl?: string;
 }) {
   const listCol = useMemo((): Address | undefined => {
     if (!isAddress(li.collection, { strict: false })) return undefined;
@@ -1425,6 +1433,35 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
             </button>
           )}
         </div>
+        {(openSeaListing || openSeaUrl) && (
+          <div className="listing-card__opensea">
+            {openSeaListing ? (
+              <>
+                <span className="badge badge--opensea">Also on OpenSea</span>
+                {openSeaListing.priceEth && (
+                  <span className="muted" style={{ fontSize: "0.75rem" }}>
+                    {openSeaListing.priceEth} {openSeaListing.priceCurrency}
+                  </span>
+                )}
+                {(openSeaListing.permalink ?? openSeaUrl) && (
+                  <a
+                    href={openSeaListing.permalink ?? openSeaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="link-btn"
+                    style={{ fontSize: "0.75rem" }}
+                  >
+                    View ↗
+                  </a>
+                )}
+              </>
+            ) : openSeaUrl ? (
+              <a href={openSeaUrl} target="_blank" rel="noreferrer" className="link-btn" style={{ fontSize: "0.75rem" }}>
+                View on OpenSea ↗
+              </a>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1725,6 +1762,7 @@ export default function App() {
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
+  const openSeaCollectionSlug = import.meta.env.VITE_OPENSEA_COLLECTION_SLUG || "token-marketplace-981215191";
   const receiptCollectionAliases = useMemo(() => envAddrCsvList("VITE_RECEIPT_COLLECTION_ALIASES"), []);
 
   const receiptScanTargets = useMemo(() => {
@@ -1824,6 +1862,18 @@ export default function App() {
       (li) => isAddress(li.seller) && getAddress(li.seller) === me,
     );
   }, [activeListings, address]);
+
+  // ── OpenSea listings ──────────────────────────────────────────────────────────
+  const { data: openSeaData } = useQuery({
+    queryKey: ["opensea-listings", openSeaCollectionSlug],
+    queryFn: fetchOpenSeaCollectionListings,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const openSeaListingsByTokenId = useMemo((): Map<string, OpenSeaListing> => {
+    if (!openSeaData || !openSeaData.ok) return new Map();
+    return indexListingsByTokenId(openSeaData.listings);
+  }, [openSeaData]);
 
   const myListedKeys = useMemo(() => {
     const set = new Set<string>();
@@ -2390,38 +2440,44 @@ export default function App() {
               )}
 
             <div className="listings-grid">
-              {filteredHomeListings.map((li) => (
-                <ListingCard
-                  key={li.listingId.toString()}
-                  li={li}
-                  bfrr={collection}
-                  address={address}
-                  txDisabled={txDisabled}
-                  isConnected={isConnected}
-                  wrongNetwork={wrongNetwork}
-                  onBuy={() => run(async () => {
-                    if (!marketplace) return;
-                    await writeContractAsync({
-                      address: marketplace,
-                      abi: feeRightsFixedSaleAbi,
-                      functionName: "buy",
-                      args: [li.listingId],
-                      value: li.priceWei,
-                      chainId: MVP_CHAIN_ID,
-                    });
-                  })}
-                  onCancel={() => run(async () => {
-                    if (!marketplace) return;
-                    await writeContractAsync({
-                      address: marketplace,
-                      abi: feeRightsFixedSaleAbi,
-                      functionName: "cancel",
-                      args: [li.listingId],
-                      chainId: MVP_CHAIN_ID,
-                    });
-                  })}
-                />
-              ))}
+              {filteredHomeListings.map((li) => {
+                const tokenIdStr = li.tokenId.toString();
+                const osListing = openSeaListingsByTokenId.get(tokenIdStr);
+                return (
+                  <ListingCard
+                    key={li.listingId.toString()}
+                    li={li}
+                    bfrr={collection}
+                    address={address}
+                    txDisabled={txDisabled}
+                    isConnected={isConnected}
+                    wrongNetwork={wrongNetwork}
+                    openSeaListing={osListing}
+                    openSeaUrl={openSeaAssetUrl(li.collection, tokenIdStr)}
+                    onBuy={() => run(async () => {
+                      if (!marketplace) return;
+                      await writeContractAsync({
+                        address: marketplace,
+                        abi: feeRightsFixedSaleAbi,
+                        functionName: "buy",
+                        args: [li.listingId],
+                        value: li.priceWei,
+                        chainId: MVP_CHAIN_ID,
+                      });
+                    })}
+                    onCancel={() => run(async () => {
+                      if (!marketplace) return;
+                      await writeContractAsync({
+                        address: marketplace,
+                        abi: feeRightsFixedSaleAbi,
+                        functionName: "cancel",
+                        args: [li.listingId],
+                        chainId: MVP_CHAIN_ID,
+                      });
+                    })}
+                  />
+                );
+              })}
             </div>
           </section>
 
@@ -2429,6 +2485,72 @@ export default function App() {
             Selling something of your own? Open{" "}
             <button type="button" className="link-btn" onClick={() => setMainTab("profile")}>My profile</button>.
           </p>
+
+          {/* ── OpenSea cross-listings ───────────────────────────────────── */}
+          {openSeaData?.ok && openSeaData.listings.length > 0 && (
+            <section>
+              <div className="section-head">
+                <h2>
+                  Also on OpenSea
+                </h2>
+                <a
+                  href={openSeaCollectionUrl(openSeaCollectionSlug)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-ghost btn-sm"
+                >
+                  View collection ↗
+                </a>
+              </div>
+              <p className="muted one-liner">
+                These Token Marketplace receipts are also listed on{" "}
+                <a href={openSeaCollectionUrl(openSeaCollectionSlug)} target="_blank" rel="noreferrer">OpenSea</a>.
+                Buy directly on OpenSea or wait for them to appear above.
+              </p>
+              <div className="listings-grid">
+                {openSeaData.listings.map((osl) => (
+                  <div key={osl.orderHash ?? osl.tokenId ?? Math.random()} className="listing-card opensea-card">
+                    <div className="listing-card__header">
+                      <span className="listing-card__title mono">
+                        {osl.tokenId ? `TMPR #${osl.tokenId}` : "TMPR NFT"}
+                      </span>
+                      <span className="badge badge--opensea">OpenSea</span>
+                    </div>
+                    <div className="listing-card__price">
+                      {osl.priceEth
+                        ? <><strong>{osl.priceEth}</strong> {osl.priceCurrency}</>
+                        : <span className="muted">Price unknown</span>
+                      }
+                    </div>
+                    {osl.maker && (
+                      <p className="listing-card__seller muted mono">
+                        Seller: {osl.maker.slice(0, 6)}…{osl.maker.slice(-4)}
+                      </p>
+                    )}
+                    {osl.permalink && (
+                      <a
+                        href={osl.permalink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginTop: "0.5rem", width: "100%", textAlign: "center" }}
+                      >
+                        Buy on OpenSea ↗
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* quiet link even when no OS listings are live */}
+          {(!openSeaData || (openSeaData.ok && openSeaData.listings.length === 0)) && (
+            <p className="muted" style={{ textAlign: "center", fontSize: "0.78rem", marginTop: "0.25rem" }}>
+              TMPR receipts are also tradable on{" "}
+              <a href={openSeaCollectionUrl(openSeaCollectionSlug)} target="_blank" rel="noreferrer">OpenSea ↗</a>
+            </p>
+          )}
         </>
       )}
 
@@ -2970,6 +3092,7 @@ export default function App() {
                   <div className="profile-receipt-list">
                     {unlistedBfrrReceipts.map((r) => {
                       const rk = receiptRowKey(r.collection, r.tokenId);
+                      const osListing = openSeaListingsByTokenId.get(r.tokenId);
                       return (
                       <div
                         key={rk}
@@ -2981,6 +3104,34 @@ export default function App() {
                           selected={selectedReceiptKey === rk}
                           staticDisplay
                         />
+                        {osListing && (
+                          <div className="os-badge-row">
+                            <span className="badge badge--opensea">On OpenSea</span>
+                            {osListing.priceEth && (
+                              <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                {osListing.priceEth} {osListing.priceCurrency}
+                              </span>
+                            )}
+                            {osListing.permalink && (
+                              <a href={osListing.permalink} target="_blank" rel="noreferrer" className="link-btn" style={{ fontSize: "0.78rem" }}>
+                                View ↗
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        {!osListing && (
+                          <div className="os-badge-row">
+                            <a
+                              href={openSeaAssetUrl(r.collection, r.tokenId)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="link-btn"
+                              style={{ fontSize: "0.78rem" }}
+                            >
+                              View on OpenSea ↗
+                            </a>
+                          </div>
+                        )}
                         <div className="profile-receipt-row__actions">
                           <button
                             type="button"
@@ -3091,31 +3242,38 @@ export default function App() {
                   </p>
                 ) : (
                   <div className="listings-grid">
-                    {myListings.map((li) => (
-                      <ListingCard
-                        key={li.listingId.toString()}
-                        li={li}
-                        bfrr={collection}
-                        address={address}
-                        txDisabled={txDisabled}
-                        isConnected={isConnected}
-                        wrongNetwork={wrongNetwork}
-                        onBuy={() => {}}
-                        onCancel={() => run(async () => {
-                          if (!marketplace || !publicClient) return;
-                          const hash = await writeContractAsync({
-                            address: marketplace,
-                            abi: feeRightsFixedSaleAbi,
-                            functionName: "cancel",
-                            args: [li.listingId],
-                            chainId: MVP_CHAIN_ID,
-                          });
-                          await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
-                          await refetchListings();
-                          setScanEpoch((e) => e + 1);
-                        })}
-                      />
-                    ))}
+                    {myListings.map((li) => {
+                      const tokenIdStr = li.tokenId.toString();
+                      const osListing = openSeaListingsByTokenId.get(tokenIdStr);
+                      return (
+                        <div key={li.listingId.toString()} style={{ display: "contents" }}>
+                          <ListingCard
+                            li={li}
+                            bfrr={collection}
+                            address={address}
+                            txDisabled={txDisabled}
+                            isConnected={isConnected}
+                            wrongNetwork={wrongNetwork}
+                            onBuy={() => {}}
+                            onCancel={() => run(async () => {
+                              if (!marketplace || !publicClient) return;
+                              const hash = await writeContractAsync({
+                                address: marketplace,
+                                abi: feeRightsFixedSaleAbi,
+                                functionName: "cancel",
+                                args: [li.listingId],
+                                chainId: MVP_CHAIN_ID,
+                              });
+                              await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
+                              await refetchListings();
+                              setScanEpoch((e) => e + 1);
+                            })}
+                            openSeaListing={osListing}
+                            openSeaUrl={openSeaAssetUrl(li.collection, tokenIdStr)}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </section>
