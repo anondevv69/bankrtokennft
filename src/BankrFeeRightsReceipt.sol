@@ -89,7 +89,21 @@ contract BankrFeeRightsReceipt is ERC721 {
 
         string memory svg = _buildSVG(pos, sSerial, ticker, tokenName, fact);
 
-        string memory json = string.concat(
+        string memory json = _encodeTokenMetadataJson(pos, sSerial, ticker, tokenName, fact, svg);
+
+        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+    }
+
+    /// @dev Split from `tokenURI` to avoid IR stack-too-deep.
+    function _encodeTokenMetadataJson(
+        Position memory pos,
+        string memory sSerial,
+        string memory ticker,
+        string memory tokenName,
+        string memory fact,
+        string memory svg
+    ) private pure returns (string memory) {
+        string memory head = string.concat(
             '{"name":"Bankr Fee Rights #',
             sSerial,
             '",',
@@ -107,7 +121,9 @@ contract BankrFeeRightsReceipt is ERC721 {
             ',"image":"data:image/svg+xml;base64,',
             Base64.encode(bytes(svg)),
             '",',
-            '"attributes":[',
+            '"attributes":['
+        );
+        string memory tail = string.concat(
             '{"trait_type":"Serial","value":',
             sSerial,
             "},",
@@ -131,8 +147,7 @@ contract BankrFeeRightsReceipt is ERC721 {
             '"}',
             "]}"
         );
-
-        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+        return string.concat(head, tail);
     }
 
     // ── SVG construction ─────────────────────────────────────────────────────
@@ -144,12 +159,13 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory tokenName,
         string memory fact
     ) private pure returns (string memory) {
+        bool compactLayout = keccak256(bytes(_safe(ticker))) == keccak256(bytes(_safe(tokenName)));
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300">',
             _svgDefs(),
             _svgFrame(fact),
             _svgHeader(sSerial, ticker, tokenName),
-            _svgBody(pos, sSerial, ticker, tokenName),
+            _svgBody(pos, sSerial, compactLayout),
             "</svg>"
         );
     }
@@ -220,12 +236,7 @@ contract BankrFeeRightsReceipt is ERC721 {
         );
     }
 
-    function _svgBody(Position memory pos, string memory sSerial, string memory ticker, string memory tokenName)
-        private
-        pure
-        returns (string memory)
-    {
-        bool compact = keccak256(bytes(_safe(ticker))) == keccak256(bytes(_safe(tokenName)));
+    function _svgBody(Position memory pos, string memory sSerial, bool compact) private pure returns (string memory) {
         string memory yPool = compact ? "210" : "218";
         string memory ySell = compact ? "234" : "242";
         string memory yFee = compact ? "258" : "266";

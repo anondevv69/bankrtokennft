@@ -4,9 +4,9 @@ out = "out"
 libs = ["lib"]
 solc = "0.8.24"
 
-# via-ir is required for contracts with complex on-chain SVG/metadata generation
-# (avoids "stack too deep" errors in tokenURI and similar view functions)
-via_ir = true
+# Complex on-chain metadata was refactored so we compile without IR. Enabling `via_ir = true` currently
+# triggers a solc Yul stack exception on this repo (“Variable … too deep in the stack”); keep false unless you split codegen further.
+via_ir = false
 optimizer = true
 optimizer_runs = 200
 

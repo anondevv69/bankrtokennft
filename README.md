@@ -200,13 +200,15 @@ Set `INITIAL_FEE_MANAGERS` to the **actual** Bankr (or compatible `IBankrFees`) 
 
 **2. Simulate, then broadcast**
 
+Foundry automatically loads **`fee-rights-exchange/.env`**. If that file sets `ESCROW_INITIAL_OWNER` to your multisig, the script will **transfer escrow ownership** to that address after allowlisting. To keep the deployer as owner, remove or comment out `ESCROW_INITIAL_OWNER` for this run.
+
 ```shell
 cd fee-rights-exchange
 source .env   # PRIVATE_KEY, and e.g. BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...
 
 export FACTORY_NAME="Bankr"
 export INITIAL_FEE_MANAGERS=0xYourMainnetFeeManager,0xOptionalSecond
-# Optional: export ESCROW_INITIAL_OWNER=0x...   # defaults to deployer
+# Optional — override final owner for this run only (else see `ESCROW_INITIAL_OWNER` in `.env`).
 
 forge script script/DeployBankrEscrowV3.s.sol \
   --rpc-url "$BASE_MAINNET_RPC_URL" \

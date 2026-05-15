@@ -10,7 +10,11 @@ import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 ///
 /// @dev Reads env vars:
 ///      PRIVATE_KEY           — deployer key (required)
-///      ESCROW_INITIAL_OWNER  — owner address; defaults to deployer
+///      ESCROW_INITIAL_OWNER  — optional final `Ownable` owner after deploy. The script deploys with the **deployer**
+///                              as owner, allowlists fee managers, then calls `transferOwnership(finalOwner)` when
+///                              this env var is set and differs from the deployer. If unset, deployer stays owner.
+///                              **Note:** Foundry auto-loads `fee-rights-exchange/.env`; unset or comment out
+///                              `ESCROW_INITIAL_OWNER` there if you want the deployer to remain owner.
 ///      INITIAL_FEE_MANAGERS  — comma-separated list of fee manager addresses to allowlist
 ///      FACTORY_NAME          — display name baked into NFT images (default: "Bankr")
 ///
@@ -25,24 +29,25 @@ contract DeployBankrEscrowV3 is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
         address configuredOwner = vm.envOr("ESCROW_INITIAL_OWNER", address(0));
-        address initialOwner = configuredOwner == address(0) ? deployer : configuredOwner;
+        address finalOwner = configuredOwner == address(0) ? deployer : configuredOwner;
         string memory feeManagersCsv = vm.envOr("INITIAL_FEE_MANAGERS", string(""));
         string memory factoryName = vm.envOr("FACTORY_NAME", string("Bankr"));
 
         console2.log("Deploying BankrEscrowV3");
-        console2.log("  Deployer:      ", deployer);
-        console2.log("  Initial owner: ", initialOwner);
-        console2.log("  Factory name:  ", factoryName);
+        console2.log("  Deployer (broadcast): ", deployer);
+        console2.log("  Final owner:          ", finalOwner);
+        console2.log("  Factory name:         ", factoryName);
 
         vm.startBroadcast(deployerPrivateKey);
 
-        escrow = new BankrEscrowV3(initialOwner);
-        address[] memory feeManagers = _parseAddressCsv(feeManagersCsv);
+        // Ownable owner must be the broadcaster until allowlist/setup finishes.
+        escrow = new BankrEscrowV3(deployer);
 
-        for (uint256 i = 0; i < feeManagers.length; i++) {
-            escrow.setFeeManagerAllowed(feeManagers[i], true);
-            escrow.setFactoryName(feeManagers[i], factoryName);
-            console2.log("  Allowed + named fee manager:", feeManagers[i]);
+        _allowlistFeeManagers(escrow, feeManagersCsv, factoryName);
+
+        if (finalOwner != deployer) {
+            escrow.transferOwnership(finalOwner);
+            console2.log("  Ownership transferred to final owner");
         }
 
         vm.stopBroadcast();
@@ -51,7 +56,16 @@ contract DeployBankrEscrowV3 is Script {
         console2.log("BankrFeeRightsReceipt deployed:", address(escrow.receipt()));
     }
 
-    function _parseAddressCsv(string memory csv) internal pure returns (address[] memory addresses) {
+    function _allowlistFeeManagers(BankrEscrowV3 escrow, string memory csv, string memory factoryName) private {
+        address[] memory mgrs = _parseAddressCsv(csv);
+        for (uint256 i = 0; i < mgrs.length; i++) {
+            escrow.setFeeManagerAllowed(mgrs[i], true);
+            escrow.setFactoryName(mgrs[i], factoryName);
+            console2.log("  Allowed + named fee manager:", mgrs[i]);
+        }
+    }
+
+    function _parseAddressCsv(string memory csv) internal view returns (address[] memory addresses) {
         bytes memory input = bytes(csv);
         if (input.length == 0) return new address[](0);
 
