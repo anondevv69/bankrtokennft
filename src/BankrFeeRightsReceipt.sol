@@ -86,15 +86,21 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory svg = _buildSVG(pos, sSerial, sym0, sym1, fact);
 
         string memory json = string.concat(
-            '{"name":"BFRR #',
+            '{"name":"Bankr Fee Rights #',
             sSerial,
             '",',
-            '"description":"Bankr Fee Rights Receipt \u2014 ',
+            '"description":"',
+            _safe(fact),
+            " fee rights on Base: ",
             _safe(sym0),
-            "/",
+            " / ",
             _safe(sym1),
-            " on Base\",",
-            '"image":"data:image/svg+xml;base64,',
+            ". Pool ",
+            _shortB32(pos.poolId),
+            ". Seller ",
+            _shortAddr(pos.seller),
+            '."',
+            ',"image":"data:image/svg+xml;base64,',
             Base64.encode(bytes(svg)),
             '",',
             '"attributes":[',
@@ -131,7 +137,7 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory fact
     ) private pure returns (string memory) {
         return string.concat(
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260">',
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300">',
             _svgDefs(),
             _svgFrame(fact),
             _svgHeader(sSerial, sym0, sym1),
@@ -144,8 +150,13 @@ contract BankrFeeRightsReceipt is ERC721 {
         return string.concat(
             "<defs>",
             '<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">',
-            '<stop offset="0" stop-color="#0a0a0a"/>',
-            '<stop offset="1" stop-color="#130f1f"/>',
+            '<stop offset="0" stop-color="#050508"/>',
+            '<stop offset="0.5" stop-color="#0f0f14"/>',
+            '<stop offset="1" stop-color="#1a0f18"/>',
+            "</linearGradient>",
+            '<linearGradient id="chip" x1="0" y1="0" x2="1" y2="0">',
+            '<stop offset="0" stop-color="#fb923c"/>',
+            '<stop offset="1" stop-color="#ea580c"/>',
             "</linearGradient>",
             "</defs>"
         );
@@ -153,15 +164,13 @@ contract BankrFeeRightsReceipt is ERC721 {
 
     function _svgFrame(string memory fact) private pure returns (string memory) {
         return string.concat(
-            '<rect width="400" height="260" fill="url(#bg)" rx="16"/>',
-            '<rect x="1" y="1" width="398" height="258" rx="15" fill="none"',
-            ' stroke="#f97316" stroke-width="1" stroke-opacity="0.3"/>',
-            // Factory badge — top-right corner
-            '<rect x="287" y="15" width="98" height="26" rx="13"',
-            ' fill="#f97316" fill-opacity="0.1" stroke="#f97316"',
-            ' stroke-width="0.75" stroke-opacity="0.45"/>',
-            '<text x="336" y="33" font-family="monospace" font-size="11"',
-            ' fill="#f97316" text-anchor="middle" font-weight="700" letter-spacing="1.5">',
+            '<rect width="420" height="300" fill="url(#bg)" rx="20"/>',
+            '<circle cx="332" cy="228" r="118" fill="#f97316" fill-opacity="0.07"/>',
+            '<circle cx="64" cy="256" r="76" fill="#7c3aed" fill-opacity="0.045"/>',
+            '<rect x="1" y="1" width="418" height="298" rx="19" fill="none" stroke="#3f3f46" stroke-opacity="0.85" stroke-width="1"/>',
+            '<rect x="18" y="48" width="384" height="236" rx="16" fill="#09090b" stroke="#f97316" stroke-opacity="0.25" stroke-width="1"/>',
+            '<rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#fdba74" stroke-opacity="0.45"/>',
+            '<text x="336" y="77" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">',
             _toUpper(fact),
             "</text>"
         );
@@ -173,30 +182,28 @@ contract BankrFeeRightsReceipt is ERC721 {
         returns (string memory)
     {
         return string.concat(
-            '<text x="24" y="62" font-family="monospace" font-size="30"',
-            ' fill="#ffffff" font-weight="700">BFRR #',
+            '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">BANKR FEE RIGHTS</text>',
+            '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">BFRR #',
             sSerial,
             "</text>",
-            '<text x="24" y="90" font-family="monospace" font-size="17"',
-            ' fill="#f97316" font-weight="600">',
+            '<rect x="32" y="130" width="356" height="48" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>',
+            '<text x="210" y="160" font-family="ui-monospace,monospace" font-size="18" fill="#fdba74" font-weight="700" text-anchor="middle">',
             _safe(sym0),
             " / ",
             _safe(sym1),
             "</text>",
-            '<line x1="24" y1="108" x2="376" y2="108" stroke="#222" stroke-width="1"/>'
+            '<line x1="32" y1="194" x2="388" y2="194" stroke="#27272f" stroke-width="1"/>'
         );
     }
 
     function _svgBody(Position memory pos, string memory sSerial) private pure returns (string memory) {
         return string.concat(
-            _svgRow("128", "POOL", _shortB32(pos.poolId)),
-            _svgRow("152", "SELLER", _shortAddr(pos.seller)),
-            _svgRow("176", "FEE MGR", _shortAddr(pos.feeManager)),
-            '<line x1="24" y1="200" x2="376" y2="200" stroke="#222" stroke-width="1"/>',
-            '<text x="24" y="220" font-family="monospace" font-size="9" fill="#444">',
-            "Bankr Fee Rights Receipt - Base</text>",
-            '<text x="376" y="220" font-family="monospace" font-size="9"',
-            ' fill="#444" text-anchor="end">#',
+            _svgRow("210", "POOL ID", _shortB32(pos.poolId)),
+            _svgRow("234", "SELLER", _shortAddr(pos.seller)),
+            _svgRow("258", "FEE MGR", _shortAddr(pos.feeManager)),
+            '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
+            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Bankr Fee Rights Receipt - Base mainnet</text>',
+            '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
             sSerial,
             "</text>"
         );
@@ -208,14 +215,14 @@ contract BankrFeeRightsReceipt is ERC721 {
         returns (string memory)
     {
         return string.concat(
-            '<text x="24" y="',
+            '<text x="32" y="',
             y,
-            '" font-family="monospace" font-size="10" fill="#555">',
+            '" font-family="ui-monospace,monospace" font-size="10" fill="#71717a" font-weight="600">',
             label,
             "</text>",
-            '<text x="100" y="',
+            '<text x="118" y="',
             y,
-            '" font-family="monospace" font-size="10" fill="#aaa">',
+            '" font-family="ui-monospace,monospace" font-size="10" fill="#e4e4e7">',
             value,
             "</text>"
         );
