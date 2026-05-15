@@ -33,7 +33,6 @@ import {
   isPublicRpcUrl,
   rpcUrlFromEnv,
 } from "./receiptScan";
-import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
 import {
   formatBankrPoolLabels,
@@ -2028,27 +2027,46 @@ export default function App() {
         positionQueries.length === 0 ||
         positionQueries.every((q) => q.status === "success" || q.status === "error"));
 
-  const { heldPoolIds } = useMemo(() => {
+  const { heldPoolIds, heldReceiptLaunchTokens } = useMemo(() => {
     const pools = new Set<string>();
+    const launchToks = new Set<string>();
     const zeroPool = `0x${"0".repeat(64)}`;
     for (const q of positionQueries) {
-      const pos = q.data;
+      const pos = q.data as {
+        feeManager: Address;
+        poolId: Hex;
+        token0: Address;
+        token1: Address;
+      } | null | undefined;
       if (!pos) continue;
       const pid = String(pos.poolId).toLowerCase();
       if (pid && pid !== zeroPool) pools.add(pid);
+      try {
+        const lt = launchedTokenFromWethPair(getAddress(pos.token0), getAddress(pos.token1));
+        if (lt) launchToks.add(lt.toLowerCase());
+      } catch {
+        /* ignore bad addresses */
+      }
     }
-    return { heldPoolIds: pools };
+    return { heldPoolIds: pools, heldReceiptLaunchTokens: launchToks };
   }, [positionQueries]);
 
   const bankrRowsNotYetReceived = useMemo(() => {
-    if (idsForWatch.length > 0 && !bfrrDedupeReady) return [];
-    if (heldPoolIds.size === 0) return bankrRows;
+    // Only hide launch rows while we resolve `positionOf` for receipts the wallet *actually* holds.
+    // If there are no owned receipts, `heldPoolIds` is empty — there is nothing to dedupe against, so
+    // do not block the list because `ownerOf` is still settling for stray / burned scanned ids.
+    if (idsForWatch.length > 0 && !bfrrDedupeReady && walletOwnedReceipts.length > 0) return [];
+    if (heldPoolIds.size === 0 && heldReceiptLaunchTokens.size === 0) return bankrRows;
     return bankrRows.filter((row) => {
       const pid = rowPoolIdHex(row);
       if (pid && heldPoolIds.has(pid.toLowerCase())) return false;
+      if (row.__launchVenue === "Clanker") {
+        const launched = rowLaunchedToken(row);
+        if (launched && heldReceiptLaunchTokens.has(launched.toLowerCase())) return false;
+      }
       return true;
     });
-  }, [bankrRows, heldPoolIds, idsForWatch.length, bfrrDedupeReady]);
+  }, [bankrRows, heldPoolIds, heldReceiptLaunchTokens, idsForWatch.length, bfrrDedupeReady, walletOwnedReceipts.length]);
 
   useEffect(() => {
     if (!ownershipReady || !selectedReceiptKey) return;
@@ -3314,13 +3332,6 @@ export default function App() {
 
       {writeError && (
         <div className="error-bar">{writeError.message.slice(0, 120)}</div>
-      )}
-
-      {!isConnected && !walletConnectConfigured && mainTab === "home" && (
-        <p className="muted" style={{ textAlign: "center", marginTop: "2rem", fontSize: "0.78rem" }}>
-          For mobile wallets add <span className="mono">VITE_REOWN_PROJECT_ID</span> from{" "}
-          <a href="https://cloud.reown.com/" target="_blank" rel="noreferrer">Reown Cloud</a>.
-        </p>
       )}
     </div>
   );
