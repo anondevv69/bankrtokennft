@@ -47,11 +47,13 @@ import {
 } from "./lib/escrowArgs";
 import {
   rowClankerListingReady,
+  rowClankerLockerVersion,
   fetchClankerTokenDetail,
   clankerLockerFromDetail,
   clankerPoolFromDetail,
   clankerPairedFromDetail,
   mergeClankerManual,
+  isV4Locker,
   type ClankerManualFields,
 } from "./lib/clankerDetail";
 import { bankrEscrowAddressFromEnv, clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
@@ -2093,20 +2095,28 @@ export default function App() {
 
   const applyClankerManualForToken = useCallback((tokenKey: string) => {
     const poolRaw = clankerPoolDraft[tokenKey]?.trim() ?? "";
-    if (!poolRaw.startsWith("0x") || !isAddress(poolRaw, { strict: false })) {
-      setClankerManualErr((prev) => ({
-        ...prev,
-        [tokenKey]: "Enter the Uniswap V3 pool contract: 0x + 40 hex characters.",
-      }));
+    const lockerRaw = clankerLockerDraft[tokenKey]?.trim() ?? "";
+
+    // Validate locker first (if provided).
+    if (lockerRaw && (!lockerRaw.startsWith("0x") || !isAddress(lockerRaw, { strict: false }))) {
+      setClankerManualErr((prev) => ({ ...prev, [tokenKey]: "Invalid locker address (leave blank to use the default)." }));
       return;
     }
-    const lockerRaw = clankerLockerDraft[tokenKey]?.trim();
-    if (lockerRaw) {
-      if (!lockerRaw.startsWith("0x") || !isAddress(lockerRaw, { strict: false })) {
-        setClankerManualErr((prev) => ({ ...prev, [tokenKey]: "Invalid locker address (leave blank to use the default)." }));
+
+    // v4 lockers don't use a Uniswap V3 pool — pool field is not required.
+    const lockerIsV4 = lockerRaw && isAddress(lockerRaw, { strict: false }) && isV4Locker(lockerRaw);
+
+    if (!lockerIsV4) {
+      // v3 path: pool is required.
+      if (!poolRaw.startsWith("0x") || !isAddress(poolRaw, { strict: false })) {
+        setClankerManualErr((prev) => ({
+          ...prev,
+          [tokenKey]: "Enter the Uniswap V3 pool contract address (0x…), or paste a Clanker v4 locker in the locker field to skip this.",
+        }));
         return;
       }
     }
+
     setClankerManualErr((prev) => {
       const next = { ...prev };
       delete next[tokenKey];
@@ -2115,9 +2125,9 @@ export default function App() {
     setClankerManualByToken((prev) => ({
       ...prev,
       [tokenKey]: {
-        pool: getAddress(poolRaw),
+        ...(poolRaw && isAddress(poolRaw, { strict: false }) ? { pool: getAddress(poolRaw) } : {}),
         ...(lockerRaw && isAddress(lockerRaw, { strict: false }) ? { locker: getAddress(lockerRaw) } : {}),
-      },
+      } as ClankerManualFields,
     }));
   }, [clankerPoolDraft, clankerLockerDraft]);
 
@@ -2506,73 +2516,83 @@ export default function App() {
                                   borderTop: "1px solid rgba(63, 63, 70, 0.35)",
                                 }}
                               >
-                                <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.4rem", lineHeight: 1.45 }}>
-                                  Paste this token’s <strong>Uniswap V3 pool</strong> on Base (not the ERC-20 address).
-                                  Locker blank → uses <span className="mono">VITE_CLANKER_DEFAULT_LOCKER</span> (v3.1{" "}
-                                  <span className="mono">LpLockerv2</span>).
-                                </p>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexWrap: "wrap",
-                                    gap: "0.4rem",
-                                    alignItems: "center",
-                                  }}
-                                >
-                                  <input
-                                    type="text"
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    placeholder="Pool contract 0x…"
-                                    className="mono"
-                                    style={{
-                                      flex: "1 1 220px",
-                                      minWidth: 0,
-                                      padding: "0.35rem 0.5rem",
-                                      borderRadius: 8,
-                                      border: "1px solid rgba(63, 63, 70, 0.55)",
-                                      background: "rgba(9, 9, 11, 0.6)",
-                                      color: "inherit",
-                                    }}
-                                    value={clankerPoolDraft[manualKey] ?? ""}
-                                    onChange={(e) =>
-                                      setClankerPoolDraft((prev) => ({
-                                        ...prev,
-                                        [manualKey]: e.target.value,
-                                      }))
-                                    }
-                                  />
-                                  <input
-                                    type="text"
-                                    autoComplete="off"
-                                    spellCheck={false}
-                                    placeholder="Locker override (optional)"
-                                    className="mono"
-                                    style={{
-                                      flex: "1 1 160px",
-                                      minWidth: 0,
-                                      padding: "0.35rem 0.5rem",
-                                      borderRadius: 8,
-                                      border: "1px solid rgba(63, 63, 70, 0.55)",
-                                      background: "rgba(9, 9, 11, 0.6)",
-                                      color: "inherit",
-                                    }}
-                                    value={clankerLockerDraft[manualKey] ?? ""}
-                                    onChange={(e) =>
-                                      setClankerLockerDraft((prev) => ({
-                                        ...prev,
-                                        [manualKey]: e.target.value,
-                                      }))
-                                    }
-                                  />
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => applyClankerManualForToken(manualKey)}
-                                  >
-                                    Apply
-                                  </button>
-                                </div>
+{(() => {
+                                  const lockerDraft = clankerLockerDraft[manualKey]?.trim() ?? "";
+                                  const draftIsV4 = lockerDraft.startsWith("0x") &&
+                                    isAddress(lockerDraft, { strict: false }) &&
+                                    isV4Locker(lockerDraft);
+                                  return (
+                                    <>
+                                      {draftIsV4 ? (
+                                        <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.4rem", lineHeight: 1.45 }}>
+                                          <strong>Clanker v4</strong> locker detected — no pool address needed.
+                                          Hit <strong>Apply</strong> to enable List.
+                                        </p>
+                                      ) : (
+                                        <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.4rem", lineHeight: 1.45 }}>
+                                          <strong>v3 token?</strong> Paste the Uniswap V3 pool contract on Base.{" "}
+                                          <strong>v4 token?</strong> Paste the Clanker v4 locker in the locker field — no pool needed.
+                                        </p>
+                                      )}
+                                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+                                        {!draftIsV4 && (
+                                          <input
+                                            type="text"
+                                            autoComplete="off"
+                                            spellCheck={false}
+                                            placeholder="Pool contract 0x… (v3 tokens)"
+                                            className="mono"
+                                            style={{
+                                              flex: "1 1 220px",
+                                              minWidth: 0,
+                                              padding: "0.35rem 0.5rem",
+                                              borderRadius: 8,
+                                              border: "1px solid rgba(63, 63, 70, 0.55)",
+                                              background: "rgba(9, 9, 11, 0.6)",
+                                              color: "inherit",
+                                            }}
+                                            value={clankerPoolDraft[manualKey] ?? ""}
+                                            onChange={(e) =>
+                                              setClankerPoolDraft((prev) => ({ ...prev, [manualKey]: e.target.value }))
+                                            }
+                                          />
+                                        )}
+                                        <input
+                                          type="text"
+                                          autoComplete="off"
+                                          spellCheck={false}
+                                          placeholder={draftIsV4 ? "Locker (v4 ✓)" : "Locker 0x… (paste v4 locker, or leave blank for v3 default)"}
+                                          className="mono"
+                                          style={{
+                                            flex: "1 1 200px",
+                                            minWidth: 0,
+                                            padding: "0.35rem 0.5rem",
+                                            borderRadius: 8,
+                                            border: `1px solid ${draftIsV4 ? "rgba(249,115,22,0.7)" : "rgba(63, 63, 70, 0.55)"}`,
+                                            background: "rgba(9, 9, 11, 0.6)",
+                                            color: "inherit",
+                                          }}
+                                          value={clankerLockerDraft[manualKey] ?? ""}
+                                          onChange={(e) =>
+                                            setClankerLockerDraft((prev) => ({ ...prev, [manualKey]: e.target.value }))
+                                          }
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-ghost btn-sm"
+                                          onClick={() => applyClankerManualForToken(manualKey)}
+                                        >
+                                          Apply
+                                        </button>
+                                      </div>
+                                      {!draftIsV4 && (
+                                        <p className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem", opacity: 0.65 }}>
+                                          v4 locker: <span className="mono">0x63D2DfEA64b3433F4071A98665bcD7Ca14d93496</span>
+                                        </p>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                                 {clankerManualErr[manualKey] ? (
                                   <p className="err" style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>
                                     {clankerManualErr[manualKey]}

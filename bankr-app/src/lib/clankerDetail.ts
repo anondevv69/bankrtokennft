@@ -59,15 +59,17 @@ export function clankerPairedFromDetail(d: ClankerTokenDetail | null): Address |
 /**
  * Merge manual Clanker pool / locker (no API) onto a profile row.
  * Key by launched token address (lowercase).
+ * `pool` is optional — v4 tokens don't have a Uniswap V3 pool contract.
  */
-export type ClankerManualFields = { pool: Address; locker?: Address };
+export type ClankerManualFields = { pool?: Address; locker?: Address };
 
 export function mergeClankerManual(
   row: Record<string, unknown>,
   manual: ClankerManualFields | undefined,
 ): Record<string, unknown> {
   if (!manual || row.__launchVenue !== "Clanker") return row;
-  const next = { ...row, __clankerPool: manual.pool };
+  const next = { ...row };
+  if (manual.pool) next.__clankerPool = manual.pool;
   if (manual.locker) next.__clankerLocker = manual.locker;
   return next;
 }
@@ -103,20 +105,31 @@ export function rowClankerLockerVersion(row: Record<string, unknown>): ClankerLo
 
 /**
  * Whether **List** can open for a Clanker row.
- * Needs Uniswap V3/V4 **pool contract** (`pool_address` from API or pasted manually).
- * Locker defaults from env (`VITE_CLANKER_DEFAULT_LOCKER`) when unset on the row.
+ *
+ * v4 tokens: no pool contract required — the wizard reads token/pair info directly
+ * from `tokenRewards(token)` on the v4 locker. Only a valid locker is needed.
+ *
+ * v3 tokens: need a Uniswap V3 pool contract address (`pool_address` from API or
+ * pasted manually). Locker defaults from `VITE_CLANKER_DEFAULT_LOCKER` when unset.
  */
 export function rowClankerListingReady(row: Record<string, unknown>): boolean {
   if (row.__launchVenue !== "Clanker") return false;
-  const ta = rowLaunchedToken(row);
-  if (!ta) return false;
+  if (!rowLaunchedToken(row)) return false;
+
+  const version = rowClankerLockerVersion(row);
+
+  if (version === "v4") {
+    // v4: just need a resolvable locker address (explicit on row or env default).
+    return Boolean(rowClankerEffectiveLocker(row));
+  }
+
+  // v3: need pool contract address.
   const pool = row.__clankerPool;
   const poolOk = typeof pool === "string" && isAddress(pool, { strict: false });
   if (!poolOk) return false;
   const locker = row.__clankerLocker;
   if (typeof locker === "string" && isAddress(locker, { strict: false })) return true;
-  // Fall back to env-configured default locker (v3 or v4).
-  return Boolean(clankerDefaultLockerFromEnv()) || Boolean(clankerV4DefaultLockerFromEnv());
+  return Boolean(clankerDefaultLockerFromEnv());
 }
 
 // Re-export for convenience.
