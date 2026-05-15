@@ -12,6 +12,16 @@ export function inferToken0Token1(launchedToken: Address): readonly [Address, Ad
   return t < w ? [a, b] : [b, a];
 }
 
+/** For Bankr Doppler-style pools, the “launch” token is usually the non-WETH leg. */
+export function launchedTokenFromWethPair(token0: Address, token1: Address): Address | undefined {
+  const w = WETH_BASE.toLowerCase();
+  const a0 = token0.toLowerCase() === w;
+  const a1 = token1.toLowerCase() === w;
+  if (a0 && !a1) return getAddress(token1);
+  if (a1 && !a0) return getAddress(token0);
+  return undefined;
+}
+
 export function normalizePoolId(raw: unknown): Hex | null {
   if (typeof raw !== "string" || !raw.startsWith("0x")) return null;
   const body = raw.slice(2).toLowerCase();

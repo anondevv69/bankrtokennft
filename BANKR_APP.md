@@ -29,6 +29,8 @@ install the skill at https://github.com/anondevv69/bankrtokennft/tree/main/fee-r
 
 Source: **`skills/bankr-fee-rights/SKILL.md`** and **`skills/bankr-fee-rights/references/dm-intents.md`** (copy-paste blocks for DMs). The mini-app still owns **orchestrated** sell flows; the skill guides **structured** agent prompts and troubleshooting. Re-run the install line above after skill updates so Bankr refreshes the skill.
 
+**Mirror or test Bankr web against this repo:** give the agent GitHub access, install the skill above, then paste the one-liner from **`BANKR_AGENT_REPO_INDEX.md`** (repo root). That file orders the docs to read and points to **`bankr-app/src/App.tsx`** / **`EscrowWizard.tsx`** as the current standalone UX reference (listings, search, wizard steps).
+
 ## Wallet signers (Bankr vs external)
 
 **Bankr Marketplace (mini-app):** Prefer **two modes** so sellers are not blocked when a custodial **security scanner** lags behind **BaseScan verification**:

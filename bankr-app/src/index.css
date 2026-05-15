@@ -564,6 +564,42 @@ button { cursor: pointer; font-family: var(--font); }
   letter-spacing: -0.02em;
 }
 
+.listings-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+}
+
+.listings-search-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 28rem;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.listings-search-input::placeholder {
+  color: var(--muted);
+}
+
+.listings-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+
+.listings-toolbar__meta {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 /* ── BFRR cards (your wallet) ── */
 .bfrr-grid {
   display: grid;
@@ -892,9 +928,24 @@ input::placeholder { color: var(--muted); }
 .listing-card__img {
   width: 100%;
   aspect-ratio: 400/260;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   display: block;
   background: var(--surface-2);
+  padding: 0.35rem;
+}
+
+.listing-card__meta-ellipsis {
+  min-width: 0;
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.listing-card__meta-ellipsis .listing-card__meta-link {
+  display: inline;
 }
 
 .listing-card__img-placeholder {
@@ -998,6 +1049,44 @@ input::placeholder { color: var(--muted); }
 }
 
 .listing-card__meta-row span:first-child { color: var(--muted); }
+
+.listing-card__meta-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.listing-card__meta-row--stack > .listing-card__meta-ellipsis {
+  max-width: 100%;
+  text-align: left;
+  align-self: flex-start;
+}
+
+.listing-card__pool-tokens {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  align-items: flex-end;
+  text-align: right;
+  min-width: 0;
+}
+
+.listing-card__pool-tokens .listing-card__meta-link {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-card__name-line {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .listing-card__actions {
   margin-top: auto;

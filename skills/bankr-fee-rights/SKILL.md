@@ -2,7 +2,7 @@
 name: bankr-fee-rights
 description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
 tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 8
+version: 9
 metadata:
   clawdbot:
     emoji: "🧾"
@@ -16,6 +16,8 @@ Guidance for agents helping users with **Bankr fee rights** custody, **BFRR** re
 **Primary UX:** the **Bankr Marketplace mini-app** should orchestrate txs (queued steps + receipts + one summary confirm). This skill supports **DMs / Ask Bankr / support** so users can still succeed with **structured facts** when the app is wrong or unavailable — **do not** treat pasted raw JSON as the only execution path; prefer **structured** “send transaction … calling …” instructions (see [QR Coin skill pattern](https://github.com/BankrBot/skills/blob/main/qrcoin/SKILL.md)).
 
 **DM templates** (what to ask the user for in one message): see **`references/dm-intents.md`**.
+
+**Repo walk-through for builders / Bankr agents mirroring the standalone app:** **`BANKR_AGENT_REPO_INDEX.md`** (repo root) — ordered reads + `bankr-app` file pointers + parity checklist.
 
 For repo contracts, ABIs, and launch QA: **`LAUNCH_CHECKLIST.md`**, **`BANKR_APP.md`**, **`README.md`** in [fee-rights-exchange](https://github.com/anondevv69/bankrtokennft).
 

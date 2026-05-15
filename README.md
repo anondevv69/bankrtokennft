@@ -33,6 +33,8 @@ The **canonical “connected to Bankr” UX** is a **Bankr App** (`index.html` +
 
 Vite + React + wagmi on **Base mainnet**: wallet connect, offers, list / cancel / buy — **standalone** (browser wallet only; no `bankr` iframe global). Set `VITE_MARKETPLACE_ADDRESS` (and optionally `VITE_DEFAULT_RECEIPT_COLLECTION`, `VITE_RPC_URL`) in `bankr-app/.env` — see `bankr-app/.env.example`. (Foundry workflows in this repo can still target Base Sepolia for lab deploys — see `VERIFICATION.md`.)
 
+**Bankr agents / parity testing:** use **`BANKR_AGENT_REPO_INDEX.md`** (one pasteable instruction + checklist) and install the skill under **`skills/bankr-fee-rights/`** per **`BANKR_APP.md`**.
+
 ```shell
 $ cd bankr-app && npm install && npm run dev
 ```

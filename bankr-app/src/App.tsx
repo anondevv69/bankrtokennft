@@ -26,7 +26,7 @@ import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId, rowPoolIdHex, launchRowLabel } from "./lib/escrowArgs";
+import { normalizePoolId, rowPoolIdHex, launchRowLabel, launchedTokenFromWethPair } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -112,6 +112,31 @@ function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
+/** Shorten huge ERC-721 `tokenId` integers for UI (full value stays in `title`). */
+function shortTokenIdDisplay(id: bigint): string {
+  const s = id.toString();
+  if (s.length <= 10) return s;
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+}
+
+/** Strip characters unsafe inside minimal SVG text nodes. */
+function svgTextSafe(s: string, maxLen: number): string {
+  return [...s.slice(0, maxLen)]
+    .filter((c) => {
+      const code = c.charCodeAt(0);
+      return code >= 32 && c !== "<" && c !== ">" && c !== "&" && c !== '"' && c !== "'";
+    })
+    .join("");
+}
+
+/** Client-side preview when `tokenURI` has no image — not on-chain metadata. */
+function listingCardPlaceholderSvg(line1: string, line2: string): string {
+  const a = svgTextSafe(line1, 44) || "Fee rights receipt";
+  const b = svgTextSafe(line2, 56);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#15101f"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="62" text-anchor="middle" fill="#f97316" font-family="ui-monospace,monospace" font-size="11" font-weight="600" letter-spacing="0.12em">BFRR</text><text x="200" y="128" text-anchor="middle" fill="#fafafa" font-family="system-ui,sans-serif" font-size="15" font-weight="650">${a}</text>${b ? `<text x="200" y="166" text-anchor="middle" fill="#a3a3a3" font-family="ui-monospace,monospace" font-size="12">${b}</text>` : ""}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 /** Normalize Bankr JSON into table rows (launches[] or creator-fees tokens[]). */
 function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
   const asArr = (v: unknown) => (Array.isArray(v) ? v : null);
@@ -150,35 +175,221 @@ function parseDataUriJsonMetadata(tokenUri: unknown): {
   pairTrait?: string;
 } {
   if (!tokenUri || typeof tokenUri !== "string") return {};
-  if (!tokenUri.startsWith("data:application/json;base64,")) return {};
-  try {
-    const b64 = tokenUri.replace("data:application/json;base64,", "");
-    const json = JSON.parse(atob(b64)) as {
-      name?: string;
-      description?: string;
-      image?: string;
-      attributes?: unknown;
-    };
-    let pairTrait: string | undefined;
-    if (Array.isArray(json.attributes)) {
-      for (const a of json.attributes) {
-        if (!a || typeof a !== "object") continue;
-        const o = a as Record<string, unknown>;
-        if (o.trait_type === "Pair" && typeof o.value === "string" && o.value.trim()) {
-          pairTrait = o.value.trim();
-          break;
-        }
-      }
-    }
-    return {
-      name: typeof json.name === "string" ? json.name : undefined,
-      description: typeof json.description === "string" ? json.description : undefined,
-      image: typeof json.image === "string" ? json.image : null,
-      pairTrait,
-    };
-  } catch {
-    return {};
+  if (tokenUri.startsWith("data:image/")) {
+    return { image: tokenUri };
   }
+  const jsonFromDataUri = tryParseDataUriJson(tokenUri);
+  if (jsonFromDataUri) return jsonFromDataUri;
+  return {};
+}
+
+/** Normalize `ipfs://…` for `<img src>` (browser cannot load ipfs://). */
+function normalizeMediaUrl(s: string | null | undefined): string | null {
+  if (!s || typeof s !== "string") return null;
+  const t = s.trim();
+  if (!t) return null;
+  if (t.startsWith("ipfs://")) return `https://ipfs.io/ipfs/${t.slice(7)}`;
+  return t;
+}
+
+function pairTraitFromAttributes(attributes: unknown): string | undefined {
+  if (!Array.isArray(attributes)) return undefined;
+  for (const a of attributes) {
+    if (!a || typeof a !== "object") continue;
+    const o = a as Record<string, unknown>;
+    if (o.trait_type === "Pair" && typeof o.value === "string" && o.value.trim()) {
+      return o.value.trim();
+    }
+  }
+  return undefined;
+}
+
+function metaFromJsonRecord(json: Record<string, unknown>, baseUrl: string): {
+  name?: string;
+  description?: string;
+  image?: string | null;
+  pairTrait?: string;
+} {
+  let imageRaw: string | undefined;
+  if (typeof json.image === "string" && json.image.trim()) imageRaw = json.image.trim();
+  let resolved: string | null = null;
+  if (imageRaw) {
+    try {
+      if (imageRaw.startsWith("ipfs://") || imageRaw.startsWith("data:") || imageRaw.startsWith("http://") || imageRaw.startsWith("https://")) {
+        resolved = normalizeMediaUrl(imageRaw);
+      } else {
+        resolved = normalizeMediaUrl(new URL(imageRaw, baseUrl).href);
+      }
+    } catch {
+      resolved = normalizeMediaUrl(imageRaw);
+    }
+  }
+  return {
+    name: typeof json.name === "string" ? json.name : undefined,
+    description: typeof json.description === "string" ? json.description : undefined,
+    image: resolved,
+    pairTrait: pairTraitFromAttributes(json.attributes),
+  };
+}
+
+/** `data:application/json;base64,...` (optional charset segment before base64). */
+function tryParseDataUriJson(tokenUri: string): ReturnType<typeof parseDataUriJsonMetadata> | null {
+  if (!tokenUri.toLowerCase().startsWith("data:application/json")) return null;
+  const m = /;base64,(.+)$/i.exec(tokenUri);
+  if (!m?.[1]) return null;
+  try {
+    const json = JSON.parse(atob(m[1])) as Record<string, unknown>;
+    return metaFromJsonRecord(json, "");
+  } catch {
+    return null;
+  }
+}
+
+function isOffChainMetadataUri(uri: string): boolean {
+  const t = uri.trim();
+  return (
+    t.startsWith("https://") ||
+    t.startsWith("http://") ||
+    t.startsWith("ipfs://")
+  );
+}
+
+function toMetadataGatewayUrl(uri: string): string {
+  const t = uri.trim();
+  if (t.startsWith("ipfs://")) return `https://ipfs.io/ipfs/${t.slice(7)}`;
+  return t;
+}
+
+function bankrStringField(o: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+/** Optional branding URL on Bankr `token-fees` rows (not always present). */
+function bankrRowOptionalImageUrl(row: Record<string, unknown>): string | null {
+  const keys = ["image", "imageUrl", "logo", "logoUrl", "icon", "avatar", "thumbnail", "artworkUri", "coverImage"];
+  for (const k of keys) {
+    const raw = row[k];
+    if (typeof raw !== "string" || !raw.trim()) continue;
+    const n = normalizeMediaUrl(raw.trim());
+    if (n) return n;
+  }
+  const nested = row.metadata ?? row.token;
+  if (nested && typeof nested === "object") {
+    return bankrRowOptionalImageUrl(nested as Record<string, unknown>);
+  }
+  return null;
+}
+
+/**
+ * Parse Bankr `GET /public/doppler/token-fees/{token}` JSON.
+ * When `poolIdWant` is set, prefer the matching `tokens[]` row; else use the first row.
+ */
+function bankrTokenFeesExtract(data: unknown, poolIdWant: string | null | undefined): {
+  name?: string;
+  symbol?: string;
+  image?: string | null;
+  token0Label?: string;
+  token1Label?: string;
+} {
+  if (!data || typeof data !== "object") return {};
+  const root = data as Record<string, unknown>;
+  const tokens = root.tokens;
+  if (!Array.isArray(tokens) || tokens.length === 0) return {};
+  const want = poolIdWant ? String(poolIdWant).toLowerCase() : "";
+  let row: Record<string, unknown> | undefined;
+  if (want) {
+    const hit = tokens.find((t) => {
+      if (!t || typeof t !== "object") return false;
+      const p = (t as Record<string, unknown>).poolId;
+      return typeof p === "string" && p.toLowerCase() === want;
+    });
+    if (hit && typeof hit === "object") row = hit as Record<string, unknown>;
+  }
+  if (!row) row = tokens[0] as Record<string, unknown>;
+  const name = bankrStringField(row, ["name", "tokenName", "title"]);
+  const symbol = bankrStringField(row, ["symbol", "tokenSymbol", "ticker"]);
+  const token0Label = bankrStringField(row, ["token0Label", "token0Name"]);
+  const token1Label = bankrStringField(row, ["token1Label", "token1Name"]);
+  const image = bankrRowOptionalImageUrl(row);
+  const out: {
+    name?: string;
+    symbol?: string;
+    image?: string | null;
+    token0Label?: string;
+    token1Label?: string;
+  } = {};
+  if (name) out.name = name;
+  if (symbol) out.symbol = symbol;
+  if (token0Label) out.token0Label = token0Label;
+  if (token1Label) out.token1Label = token1Label;
+  if (image) out.image = image;
+  return out;
+}
+
+/** Merge `tokenURI` data: JSON with optional HTTP/IPFS metadata document. */
+function useResolvedTokenMetadata(rawUri: unknown, enabled: boolean): {
+  name?: string;
+  description?: string;
+  image?: string | null;
+  pairTrait?: string;
+  remoteLoading: boolean;
+} {
+  const inline = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
+  const uriStr = typeof rawUri === "string" ? rawUri.trim() : "";
+  const gateway = uriStr && isOffChainMetadataUri(uriStr) ? toMetadataGatewayUrl(uriStr) : null;
+
+  const { data: remote, isLoading: remoteLoading } = useQuery({
+    queryKey: ["bfrr-metadata-uri", gateway],
+    enabled: Boolean(enabled && gateway),
+    staleTime: 300_000,
+    retry: 1,
+    queryFn: async () => {
+      const res = await fetch(gateway!, { mode: "cors" });
+      if (!res.ok) throw new Error(`metadata ${res.status}`);
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("application/json") || ct.includes("text/json") || gateway!.toLowerCase().endsWith(".json")) {
+        const json = (await res.json()) as Record<string, unknown>;
+        const base = (() => {
+          try {
+            return new URL(".", gateway!).href;
+          } catch {
+            return gateway!;
+          }
+        })();
+        return metaFromJsonRecord(json, base);
+      }
+      if (ct.startsWith("image/")) {
+        return { image: gateway! };
+      }
+      try {
+        const json = (await res.json()) as Record<string, unknown>;
+        const base = new URL(".", gateway!).href;
+        return metaFromJsonRecord(json, base);
+      } catch {
+        return {};
+      }
+    },
+  });
+
+  return useMemo(() => {
+    if (inline.image || inline.name || inline.description || inline.pairTrait) {
+      return { ...inline, remoteLoading: false };
+    }
+    if (remote) {
+      return {
+        name: remote.name ?? inline.name,
+        description: remote.description ?? inline.description,
+        image: remote.image ?? inline.image,
+        pairTrait: remote.pairTrait ?? inline.pairTrait,
+        remoteLoading: false,
+      };
+    }
+    return { ...inline, remoteLoading: remoteLoading && Boolean(gateway) };
+  }, [inline, remote, remoteLoading, gateway]);
 }
 
 // ── ABIs (minimal inline) ────────────────────────────────────────────────────
@@ -203,6 +414,10 @@ const escrowAbi = [
 
 const erc20SymbolAbi = [
   { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+] as const;
+
+const erc20NameAbi = [
+  { type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
 ] as const;
 
 const transferEvent = parseAbiItem(
@@ -264,6 +479,170 @@ async function fetchActiveListings(
   return out;
 }
 
+/** On-chain fields used for home search (BFRR listings); non-BFRR rows use listing fields only. */
+type ListingSearchEnrich = {
+  factoryName: string;
+  poolId: string;
+  token0: Address;
+  token1: Address;
+  feeManager: Address;
+  metaName?: string;
+  sym0?: string;
+  sym1?: string;
+  nm0?: string;
+  nm1?: string;
+};
+
+function buildListingSearchBlob(li: ActiveListing, enrich: ListingSearchEnrich | null): string {
+  const parts: string[] = [
+    li.seller,
+    li.tokenId.toString(),
+    li.listingId.toString(),
+    formatEther(li.priceWei),
+    li.collection,
+  ];
+  if (isAddress(li.seller)) parts.push(getAddress(li.seller));
+  if (isAddress(li.collection)) parts.push(getAddress(li.collection));
+  if (enrich) {
+    parts.push(
+      enrich.factoryName,
+      enrich.poolId,
+      enrich.token0,
+      enrich.token1,
+      enrich.feeManager,
+      enrich.metaName ?? "",
+      enrich.sym0 ?? "",
+      enrich.sym1 ?? "",
+      enrich.nm0 ?? "",
+      enrich.nm1 ?? "",
+    );
+    if (enrich.sym0 && enrich.sym1) parts.push(`${enrich.sym0}/${enrich.sym1}`, `${enrich.sym0} / ${enrich.sym1}`);
+    if (enrich.nm0 && enrich.nm1) parts.push(`${enrich.nm0}/${enrich.nm1}`);
+  }
+  return parts.filter(Boolean).join(" ").toLowerCase();
+}
+
+function listingMatchesSearch(li: ActiveListing, enrich: ListingSearchEnrich | null, qRaw: string): boolean {
+  const blob = buildListingSearchBlob(li, enrich);
+  const parts = qRaw
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((p) => p.replace(/\s/g, ""))
+    .filter(Boolean);
+  if (parts.length === 0) return true;
+  return parts.every((p) => blob.includes(p));
+}
+
+function useActiveListingsSearchEnrichment(
+  listings: ActiveListing[],
+  wrongNetwork: boolean,
+): (ListingSearchEnrich | null)[] {
+  const publicClient = usePublicClient();
+  const queries = useQueries({
+    queries: listings.map((li) => {
+      const col =
+        isAddress(li.collection, { strict: false })
+          ? (() => {
+              try {
+                return getAddress(li.collection);
+              } catch {
+                return null;
+              }
+            })()
+          : null;
+      return {
+        queryKey: ["listing-search-enrich", li.listingId.toString(), li.tokenId.toString(), col ?? ""] as const,
+        enabled: Boolean(publicClient && col && !wrongNetwork),
+        staleTime: 20_000,
+        queryFn: async (): Promise<ListingSearchEnrich> => {
+          if (!publicClient || !col) {
+            throw new Error("missing client");
+          }
+          const [position, rawUri] = await Promise.all([
+            publicClient.readContract({
+              address: col,
+              abi: bankrFeeRightsReceiptAbi,
+              functionName: "positionOf",
+              args: [li.tokenId],
+            }),
+            publicClient.readContract({
+              address: col,
+              abi: bankrFeeRightsReceiptAbi,
+              functionName: "tokenURI",
+              args: [li.tokenId],
+            }),
+          ]);
+          const t0 = getAddress(position.token0);
+          const t1 = getAddress(position.token1);
+          const meta = parseDataUriJsonMetadata(rawUri);
+          async function safeSymbol(a: Address): Promise<string | undefined> {
+            try {
+              const s = await publicClient.readContract({
+                address: a,
+                abi: erc20SymbolAbi,
+                functionName: "symbol",
+              });
+              return typeof s === "string" && s.trim() ? s.trim() : undefined;
+            } catch {
+              return undefined;
+            }
+          }
+          async function safeName(a: Address): Promise<string | undefined> {
+            try {
+              const s = await publicClient.readContract({
+                address: a,
+                abi: erc20NameAbi,
+                functionName: "name",
+              });
+              return typeof s === "string" && s.trim() ? s.trim() : undefined;
+            } catch {
+              return undefined;
+            }
+          }
+          const [sym0, sym1, nm0, nm1] = await Promise.all([
+            safeSymbol(t0),
+            safeSymbol(t1),
+            safeName(t0),
+            safeName(t1),
+          ]);
+          return {
+            factoryName: typeof position.factoryName === "string" ? position.factoryName : "",
+            poolId: position.poolId as string,
+            token0: t0,
+            token1: t1,
+            feeManager: getAddress(position.feeManager),
+            metaName: meta.name?.trim(),
+            sym0,
+            sym1,
+            nm0,
+            nm1,
+          };
+        },
+      };
+    }),
+  });
+  return useMemo(
+    () =>
+      listings.map((li, i) => {
+        const col =
+          isAddress(li.collection, { strict: false })
+            ? (() => {
+                try {
+                  return getAddress(li.collection);
+                } catch {
+                  return null;
+                }
+              })()
+            : null;
+        if (!col) return null;
+        const d = queries[i]?.data;
+        return d ?? null;
+      }),
+    [listings, queries],
+  );
+}
+
 // ── BfrrCard ─────────────────────────────────────────────────────────────────
 
 function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, staticDisplay }: {
@@ -290,7 +669,7 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
     query: { enabled: tid !== null && !wrongNetwork },
   });
 
-  const meta = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
+  const meta = useResolvedTokenMetadata(rawUri, tid !== null && !wrongNetwork);
   const imgSrc = meta.image ?? null;
 
   const t0addr = useMemo(() => {
@@ -347,15 +726,25 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
 
   const basescanNft = `https://basescan.org/nft/${collection}/${id}`;
 
+  const [imgBroken, setImgBroken] = useState(false);
+  useEffect(() => {
+    setImgBroken(false);
+  }, [imgSrc]);
+
   const body = (
     <>
-      {imgSrc ? (
+      {imgSrc && !imgBroken ? (
         <img className="bfrr-card__img" src={imgSrc}
-          alt={title} />
+          alt={title} loading="lazy" decoding="async"
+          onError={() => setImgBroken(true)} />
       ) : (
         <div className="bfrr-card__img-placeholder">
           <span className="bfrr-card__badge">BFRR</span>
-          {serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>}
+          {meta.remoteLoading && !imgSrc ? (
+            <span className="bfrr-card__serial"><span className="spinner" /> Metadata…</span>
+          ) : (
+            serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>
+          )}
         </div>
       )}
       <div className="bfrr-card__footer">
@@ -418,30 +807,74 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   txDisabled: boolean; isConnected: boolean; wrongNetwork: boolean;
   onBuy: () => void; onCancel: () => void;
 }) {
-  const isBfrr = bfrr !== undefined && getAddress(li.collection) === getAddress(bfrr);
+  const listCol = useMemo((): Address | undefined => {
+    if (!isAddress(li.collection, { strict: false })) return undefined;
+    try {
+      return getAddress(li.collection);
+    } catch {
+      return undefined;
+    }
+  }, [li.collection]);
+
+  /** Read pool + metadata from the listed NFT contract (do not require `VITE_DEFAULT_RECEIPT_COLLECTION` to match). */
+  const receiptReadsEnabled = Boolean(listCol && !wrongNetwork);
 
   const { data: rawUri } = useReadContract({
-    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    address: receiptReadsEnabled ? listCol : undefined, abi: bankrFeeRightsReceiptAbi,
     functionName: "tokenURI", args: [li.tokenId], chainId: MVP_CHAIN_ID,
-    query: { enabled: isBfrr && !wrongNetwork },
+    query: { enabled: receiptReadsEnabled, staleTime: 20_000 },
   });
   const { data: serial } = useReadContract({
-    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    address: receiptReadsEnabled ? listCol : undefined, abi: bankrFeeRightsReceiptAbi,
     functionName: "serialOf", args: [li.tokenId], chainId: MVP_CHAIN_ID,
-    query: { enabled: isBfrr && !wrongNetwork },
+    query: { enabled: receiptReadsEnabled, staleTime: 20_000 },
   });
   const { data: position } = useReadContract({
-    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    address: receiptReadsEnabled ? listCol : undefined, abi: bankrFeeRightsReceiptAbi,
     functionName: "positionOf", args: [li.tokenId], chainId: MVP_CHAIN_ID,
-    query: { enabled: isBfrr && !wrongNetwork },
+    query: { enabled: receiptReadsEnabled, staleTime: 20_000 },
   });
 
-  const meta = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
-  const imgSrc = meta.image ?? null;
+  const poolIdLc = useMemo(() => {
+    if (!position) return null;
+    const p = position.poolId;
+    if (p === undefined || p === null) return null;
+    return String(p).toLowerCase();
+  }, [position]);
+
+  const bankrLaunched = useMemo(() => {
+    if (!position || typeof position.token0 !== "string" || typeof position.token1 !== "string") return undefined;
+    if (!isAddress(position.token0, { strict: false }) || !isAddress(position.token1, { strict: false })) return undefined;
+    try {
+      return launchedTokenFromWethPair(getAddress(position.token0), getAddress(position.token1));
+    } catch {
+      return undefined;
+    }
+  }, [position]);
+
+  const { data: bankrFeesMeta } = useQuery({
+    queryKey: ["bankr-token-fees", bankrLaunched, poolIdLc],
+    enabled: Boolean(receiptReadsEnabled && bankrLaunched && !wrongNetwork),
+    staleTime: 120_000,
+    retry: 0,
+    queryFn: async () => {
+      const res = await fetch(`/api/bankr-token-fees?token=${encodeURIComponent(bankrLaunched!)}&days=30`);
+      const json = (await res.json()) as { ok?: boolean; data?: unknown };
+      if (!res.ok || !json.ok) return {};
+      return bankrTokenFeesExtract(json.data, poolIdLc);
+    },
+  });
+
+  const meta = useResolvedTokenMetadata(rawUri, receiptReadsEnabled);
+  const chainImg = meta.image ?? null;
+  const bankrImg = bankrFeesMeta?.image ?? null;
   const receiptTitle =
     (position && typeof position.factoryName === "string" && position.factoryName.trim())
       ? position.factoryName.trim()
-      : (meta.name?.trim() || null);
+      : (meta.name?.trim() ||
+        bankrFeesMeta?.name?.trim() ||
+        bankrFeesMeta?.symbol?.trim() ||
+        null);
 
   const t0addr = useMemo(() => {
     if (!position || typeof position.token0 !== "string") return undefined;
@@ -463,61 +896,152 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   }, [position]);
 
   const { data: sym0 } = useReadContract({
-    address: isBfrr ? t0addr : undefined,
+    address: receiptReadsEnabled ? t0addr : undefined,
     abi: erc20SymbolAbi,
     functionName: "symbol",
     chainId: MVP_CHAIN_ID,
-    query: { enabled: isBfrr && Boolean(t0addr) && !wrongNetwork },
+    query: { enabled: receiptReadsEnabled && Boolean(t0addr) },
   });
   const { data: sym1 } = useReadContract({
-    address: isBfrr ? t1addr : undefined,
+    address: receiptReadsEnabled ? t1addr : undefined,
     abi: erc20SymbolAbi,
     functionName: "symbol",
     chainId: MVP_CHAIN_ID,
-    query: { enabled: isBfrr && Boolean(t1addr) && !wrongNetwork },
+    query: { enabled: receiptReadsEnabled && Boolean(t1addr) },
+  });
+  const { data: nm0 } = useReadContract({
+    address: receiptReadsEnabled ? t0addr : undefined,
+    abi: erc20NameAbi,
+    functionName: "name",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: receiptReadsEnabled && Boolean(t0addr) },
+  });
+  const { data: nm1 } = useReadContract({
+    address: receiptReadsEnabled ? t1addr : undefined,
+    abi: erc20NameAbi,
+    functionName: "name",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: receiptReadsEnabled && Boolean(t1addr) },
   });
 
   const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
   const symbol1 = typeof sym1 === "string" && sym1.trim() ? sym1.trim() : null;
+  const name0 = typeof nm0 === "string" && nm0.trim() ? nm0.trim() : null;
+  const name1 = typeof nm1 === "string" && nm1.trim() ? nm1.trim() : null;
 
   const pairLabel =
     position && typeof position.token0 === "string" && typeof position.token1 === "string"
       ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
       : null;
 
+  const bankrPairLine =
+    bankrFeesMeta?.token0Label && bankrFeesMeta?.token1Label
+      ? `${String(bankrFeesMeta.token0Label).trim()} / ${String(bankrFeesMeta.token1Label).trim()}`
+      : null;
+
   const tickerLine =
     symbol0 && symbol1
       ? `${symbol0} / ${symbol1}`
-      : (meta.pairTrait?.trim() || pairLabel);
+      : (bankrPairLine || meta.pairTrait?.trim() || pairLabel);
+
+  const pairSymbols = symbol0 && symbol1 ? `${symbol0} / ${symbol1}` : null;
+  const headlineText =
+    pairSymbols ||
+    (receiptTitle?.trim() || null) ||
+    meta.name?.trim() ||
+    bankrFeesMeta?.symbol?.trim() ||
+    (receiptReadsEnabled ? "Fee rights receipt" : "Listing");
+  const sublineText =
+    pairSymbols && receiptTitle?.trim() && receiptTitle.trim() !== pairSymbols
+      ? receiptTitle.trim()
+      : (pairSymbols && meta.name?.trim() && meta.name.trim() !== pairSymbols ? meta.name.trim() : null);
 
   const imSeller = address !== undefined && isAddress(li.seller) &&
     getAddress(li.seller) === getAddress(address);
 
   const sellerAddr = isAddress(li.seller) ? getAddress(li.seller) : li.seller;
   const sellerScan = isAddress(li.seller) ? `https://basescan.org/address/${getAddress(li.seller)}` : undefined;
-  const nftScan = isBfrr
-    ? `https://basescan.org/nft/${getAddress(li.collection)}/${li.tokenId.toString()}`
+  const nftScan = receiptReadsEnabled && listCol
+    ? `https://basescan.org/nft/${listCol}/${li.tokenId.toString()}`
     : undefined;
+
+  const [imgBroken, setImgBroken] = useState(false);
+  const [bankrImgBroken, setBankrImgBroken] = useState(false);
+  useEffect(() => {
+    setImgBroken(false);
+    setBankrImgBroken(false);
+  }, [li.collection, li.tokenId, rawUri, chainImg, bankrImg]);
+
+  const receiptIdLabel =
+    serial !== undefined ? `#${String(serial)}` : `#${shortTokenIdDisplay(li.tokenId)}`;
+
+  const rasterChain = chainImg && !imgBroken ? chainImg : null;
+  const rasterBankr = bankrImg && !bankrImgBroken ? bankrImg : null;
+  const rasterSrc = rasterChain ?? rasterBankr;
+
+  const synthDataUri = useMemo(() => {
+    const hasRaster = Boolean(rasterSrc);
+    if (hasRaster) return null;
+    const l1 = pairSymbols || tickerLine || headlineText;
+    const l2 =
+      t0addr && t1addr
+        ? `${shortAddr(t0addr)} / ${shortAddr(t1addr)}`
+        : receiptIdLabel;
+    if (!receiptReadsEnabled && !l1) return null;
+    return listingCardPlaceholderSvg(String(l1), String(l2));
+  }, [
+    rasterSrc,
+    pairSymbols,
+    tickerLine,
+    headlineText,
+    t0addr,
+    t1addr,
+    receiptIdLabel,
+    receiptReadsEnabled,
+  ]);
 
   return (
     <div className="listing-card">
-      {imgSrc ? (
-        <img className="listing-card__img" src={imgSrc}
-          alt={receiptTitle ?? "Listing"} />
+      {rasterSrc ? (
+        <img
+          className="listing-card__img"
+          src={rasterSrc}
+          alt={receiptTitle || meta.name || bankrFeesMeta?.name || "Listing"}
+          loading="lazy"
+          decoding="async"
+          onError={() => {
+            if (chainImg && !imgBroken) setImgBroken(true);
+            else setBankrImgBroken(true);
+          }}
+        />
+      ) : synthDataUri ? (
+        <img
+          className="listing-card__img"
+          src={synthDataUri}
+          alt={headlineText}
+          loading="lazy"
+          decoding="async"
+        />
       ) : (
         <div className="listing-card__img-placeholder">
           <span className="bfrr-card__badge">BFRR</span>
-          {serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>}
+          <span className="bfrr-card__serial">
+            {meta.remoteLoading && !chainImg && !bankrImg ? (
+              <><span className="spinner" /> Metadata…</>
+            ) : (
+              receiptIdLabel
+            )}
+          </span>
         </div>
       )}
       <div className="listing-card__body">
-        <div className="listing-card__headline" title={receiptTitle || meta.name || undefined}>
-          {receiptTitle || meta.name?.trim() || (isBfrr ? "Fee rights receipt" : "Listing")}
+        <div className="listing-card__headline" title={[headlineText, t0addr && t1addr ? `${t0addr} · ${t1addr}` : ""].filter(Boolean).join(" · ")}>
+          {headlineText}
         </div>
-        {isBfrr && meta.name?.trim() && receiptTitle?.trim() && meta.name.trim() !== receiptTitle.trim() && (
-          <div className="listing-card__nft-name" title={meta.name}>{meta.name.trim()}</div>
+        {sublineText && (
+          <div className="listing-card__nft-name" title={sublineText}>{sublineText}</div>
         )}
-        {isBfrr && tickerLine && (
+        {receiptReadsEnabled && tickerLine && tickerLine !== headlineText && (
           <div
             className={`listing-card__tickers${symbol0 && symbol1 ? "" : " mono"}`}
             title={t0addr && t1addr ? `${t0addr} ↔ ${t1addr}` : tickerLine}
@@ -525,32 +1049,11 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
             {tickerLine}
           </div>
         )}
-        {isBfrr && t0addr && t1addr && (
-          <div className="listing-card__token-addrs">
-            <a
-              className="listing-card__token-addr mono"
-              href={`https://basescan.org/address/${t0addr}`}
-              target="_blank"
-              rel="noreferrer"
-              title={t0addr}
-            >
-              {symbol0 ? `${symbol0} ` : ""}{shortAddr(t0addr)}
-            </a>
-            <a
-              className="listing-card__token-addr mono"
-              href={`https://basescan.org/address/${t1addr}`}
-              target="_blank"
-              rel="noreferrer"
-              title={t1addr}
-            >
-              {symbol1 ? `${symbol1} ` : ""}{shortAddr(t1addr)}
-            </a>
-          </div>
-        )}
         <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__meta">
           <div className="listing-card__meta-row">
             <span>Seller</span>
+            <span className="listing-card__meta-ellipsis">
             {sellerScan ? (
               <a className="mono listing-card__meta-link" href={sellerScan} target="_blank" rel="noreferrer" title={sellerAddr}>
                 {shortAddr(sellerAddr)}
@@ -558,33 +1061,65 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
             ) : (
               <span className="mono" title={sellerAddr}>{shortAddr(sellerAddr)}</span>
             )}
+            </span>
           </div>
+          {receiptReadsEnabled && t0addr && t1addr && (
+            <div className="listing-card__meta-row listing-card__meta-row--stack">
+              <span>Pool tokens</span>
+              <div className="listing-card__pool-tokens">
+                <a
+                  className="mono listing-card__meta-link"
+                  href={`https://basescan.org/address/${t0addr}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={t0addr}
+                >
+                  {symbol0 ? `${symbol0} · ` : ""}{shortAddr(t0addr)}
+                </a>
+                <a
+                  className="mono listing-card__meta-link"
+                  href={`https://basescan.org/address/${t1addr}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={t1addr}
+                >
+                  {symbol1 ? `${symbol1} · ` : ""}{shortAddr(t1addr)}
+                </a>
+              </div>
+            </div>
+          )}
+          {receiptReadsEnabled && (name0 || name1) && (
+            <div className="listing-card__meta-row listing-card__meta-row--stack">
+              <span>Token names</span>
+              <div className="listing-card__pool-tokens">
+                <span className="listing-card__name-line" title={[name0, name1].filter(Boolean).join(" · ")}>
+                  {name0}
+                  {name0 && name1 && " · "}
+                  {name1}
+                </span>
+              </div>
+            </div>
+          )}
           <div className="listing-card__meta-row">
-            <span>{isBfrr ? "Receipt" : "Token"}</span>
+            <span>Receipt</span>
+            <span className="listing-card__meta-ellipsis">
             {nftScan ? (
-              <a className="mono listing-card__meta-link" href={nftScan} target="_blank" rel="noreferrer" title={`Token ID ${li.tokenId.toString()}`}>
-                {serial !== undefined ? `#${String(serial)}` : `id ${li.tokenId.toString()}`}
+              <a
+                className="mono listing-card__meta-link"
+                href={nftScan}
+                target="_blank"
+                rel="noreferrer"
+                title={`Token ID ${li.tokenId.toString()}${meta.name ? ` · ${meta.name}` : ""}`}
+              >
+                {receiptIdLabel}
               </a>
             ) : (
               <span className="mono" title={li.tokenId.toString()}>
-                {serial !== undefined ? `#${String(serial)}` : shortAddr(li.tokenId.toString())}
+                {receiptIdLabel}
               </span>
             )}
+            </span>
           </div>
-          {!isBfrr && isAddress(li.collection) && (
-            <div className="listing-card__meta-row">
-              <span>Contract</span>
-              <a
-                className="mono listing-card__meta-link"
-                href={`https://basescan.org/address/${getAddress(li.collection)}`}
-                target="_blank"
-                rel="noreferrer"
-                title={getAddress(li.collection)}
-              >
-                {shortAddr(getAddress(li.collection))}
-              </a>
-            </div>
-          )}
         </div>
         <div className="listing-card__actions">
           {imSeller ? (
@@ -609,10 +1144,13 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
 // ── SellPanel ────────────────────────────────────────────────────────────────
 
 function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
-  wrongNetwork, isConnected, onDone }: {
+  wrongNetwork, isConnected, onDone, onListFlowStart, onListFlowEnd }: {
   tokenIdStr: string; collection: Address; marketplace: Address;
   address: Address | undefined; txDisabled: boolean;
-  wrongNetwork: boolean; isConnected: boolean; onDone: () => void;
+  wrongNetwork: boolean; isConnected: boolean;
+  onDone: () => void | Promise<void>;
+  onListFlowStart?: () => void;
+  onListFlowEnd?: () => void;
 }) {
   const [price, setPrice] = useState("0.01");
   const [listStep, setListStep] = useState<null | "approve" | "list">(null);
@@ -666,6 +1204,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     if (!priceOk || tokenId === null || txDisabled || !publicClient) return;
     if (listLock.current) return;
     listLock.current = true;
+    onListFlowStart?.();
     try {
       if (!canPull) {
         setListStep("approve");
@@ -673,21 +1212,23 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
           address: collection, abi: erc721Abi, functionName: "approve",
           args: [marketplace, tokenId], chainId: MVP_CHAIN_ID,
         });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash, chainId: MVP_CHAIN_ID });
         setListStep("list");
       } else {
         setListStep("list");
       }
-      await writeContractAsync({
+      const listHash = await writeContractAsync({
         address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "list",
         args: [collection, tokenId, parseEther(priceNorm)], chainId: MVP_CHAIN_ID,
       });
-      onDone();
+      await publicClient.waitForTransactionReceipt({ hash: listHash, chainId: MVP_CHAIN_ID });
+      await Promise.resolve(onDone());
     } catch {
       /* wallet / rpc errors */
     } finally {
       listLock.current = false;
       setListStep(null);
+      onListFlowEnd?.();
     }
   });
 
@@ -789,9 +1330,12 @@ export default function App() {
   const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
+  const [homeListingSearch, setHomeListingSearch] = useState("");
   const walletScanKeyRef = useRef("");
   /** Profile row: which BFRR tokenId is currently executing `redeemRights` (for button + row hint). */
   const [redeemingForId, setRedeemingForId] = useState<string | null>(null);
+  /** Profile: approve+list in flight for this receipt (row stays visible until tx confirms + listings refetch). */
+  const [listingBusyTokenId, setListingBusyTokenId] = useState<string | null>(null);
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
@@ -850,20 +1394,32 @@ export default function App() {
   }, [isConnected, address, collection?.toLowerCase(), wrongNetwork, scanEpoch]);
 
   // Listings
-  const { data: nextListingId } = useReadContract({
-    address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "nextListingId",
-    chainId: MVP_CHAIN_ID, query: { enabled: Boolean(marketplace && !wrongNetwork) },
-  });
-
-  const { data: activeListings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
-    queryKey: ["listings", marketplace, (nextListingId ?? 0n).toString()],
+  const { data: activeListings = [], isLoading: listingsLoading, isFetching: listingsFetching, refetch: refetchListings } = useQuery({
+    queryKey: ["listings", marketplace ?? ""],
     queryFn: async () => {
-      if (!publicClient || !marketplace || nextListingId === undefined) return [];
-      return fetchActiveListings(publicClient, marketplace, nextListingId as bigint);
+      if (!publicClient || !marketplace) return [];
+      const nextId = await publicClient.readContract({
+        address: marketplace,
+        abi: feeRightsFixedSaleAbi,
+        functionName: "nextListingId",
+      }) as bigint;
+      return fetchActiveListings(publicClient, marketplace, nextId);
     },
-    enabled: Boolean(publicClient && marketplace && nextListingId !== undefined && !wrongNetwork),
+    enabled: Boolean(publicClient && marketplace && !wrongNetwork),
     staleTime: 12_000,
   });
+
+  const listingSearchEnrich = useActiveListingsSearchEnrichment(
+    activeListings as ActiveListing[],
+    wrongNetwork,
+  );
+
+  const filteredHomeListings = useMemo(() => {
+    const list = activeListings as ActiveListing[];
+    return list.filter((li, i) =>
+      listingMatchesSearch(li, listingSearchEnrich[i] ?? null, homeListingSearch),
+    );
+  }, [activeListings, listingSearchEnrich, homeListingSearch]);
 
   const myListings = useMemo(() => {
     if (!address) return [];
@@ -1154,9 +1710,29 @@ export default function App() {
               <h2>All listings</h2>
               <button type="button" className="btn btn-ghost btn-sm"
                 disabled={!marketplace || listingsLoading}
-                onClick={() => void refetchListings()}>
+                onClick={() => {
+                  void qc.invalidateQueries();
+                  void refetchListings();
+                }}>
                 Refresh
               </button>
+            </div>
+
+            <div className="listings-toolbar">
+              <input
+                type="search"
+                className="listings-search-input"
+                placeholder="Search seller, token address, symbol, name, pool id…"
+                value={homeListingSearch}
+                onChange={(e) => setHomeListingSearch(e.target.value)}
+                aria-label="Filter listings"
+                disabled={!marketplace || listingsLoading}
+              />
+              {homeListingSearch.trim() !== "" && !listingsLoading && (
+                <span className="listings-toolbar__meta muted">
+                  {filteredHomeListings.length} of {(activeListings as ActiveListing[]).length}
+                </span>
+              )}
             </div>
 
             {listingsLoading && <p className="empty"><span className="spinner" />Loading…</p>}
@@ -1165,8 +1741,15 @@ export default function App() {
               <p className="empty">{marketplace ? "Nothing for sale right now." : "Listings are unavailable — this deployment has no marketplace configured."}</p>
             )}
 
+            {!listingsLoading &&
+              (activeListings as ActiveListing[]).length > 0 &&
+              filteredHomeListings.length === 0 &&
+              homeListingSearch.trim() !== "" && (
+                <p className="empty">No listings match your search. Try a wallet address, contract address, ticker, or words from the pool name.</p>
+              )}
+
             <div className="listings-grid">
-              {(activeListings as ActiveListing[]).map((li) => (
+              {filteredHomeListings.map((li) => (
                 <ListingCard
                   key={li.listingId.toString()}
                   li={li}
@@ -1562,7 +2145,7 @@ export default function App() {
                     {unlistedBfrrIds.map((id) => (
                       <div
                         key={id}
-                        className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}${redeemingForId === id ? " profile-receipt-row--pending" : ""}`}
+                        className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}${redeemingForId === id || listingBusyTokenId === id ? " profile-receipt-row--pending" : ""}`}
                       >
                         <BfrrCard
                           tokenId={id}
@@ -1575,7 +2158,7 @@ export default function App() {
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            disabled={txDisabled}
+                            disabled={txDisabled || Boolean(listingBusyTokenId)}
                             onClick={() => setSelectedId(id)}
                           >
                             List
@@ -1583,7 +2166,7 @@ export default function App() {
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            disabled={txDisabled}
+                            disabled={txDisabled || Boolean(listingBusyTokenId)}
                             onClick={() => run(async () => {
                               setRedeemingForId(id);
                               try {
@@ -1614,6 +2197,11 @@ export default function App() {
                             Confirm in your wallet, then wait for Base to include the transaction.
                           </p>
                         )}
+                        {listingBusyTokenId === id && redeemingForId !== id && (
+                          <p className="profile-receipt-row__status muted">
+                            <span className="spinner" /> Listing on Base… Your listings update when the transaction is confirmed.
+                          </p>
+                        )}
                         {selectedId === id && (
                           <div className="profile-receipt-row__panel">
                             <SellPanel
@@ -1624,10 +2212,13 @@ export default function App() {
                               txDisabled={txDisabled}
                               wrongNetwork={wrongNetwork}
                               isConnected={isConnected}
-                              onDone={() => {
+                              onListFlowStart={() => setListingBusyTokenId(id)}
+                              onListFlowEnd={() => setListingBusyTokenId(null)}
+                              onDone={async () => {
                                 setSelectedId(null);
-                                invalidate();
-                                void refetchListings();
+                                await qc.invalidateQueries();
+                                await refetchListings();
+                                setScanEpoch((e) => e + 1);
                               }}
                             />
                           </div>
@@ -1657,7 +2248,13 @@ export default function App() {
                 </div>
                 <p className="muted one-liner">What you are currently selling here.</p>
                 {myListings.length === 0 ? (
-                  <p className="empty">Nothing listed yet.</p>
+                  <p className="empty">
+                    {listingBusyTokenId || listingsFetching ? (
+                      <><span className="spinner" />{listingBusyTokenId ? "Finishing your listing — syncing with Base…" : "Loading listings…"}</>
+                    ) : (
+                      "Nothing listed yet."
+                    )}
+                  </p>
                 ) : (
                   <div className="listings-grid">
                     {myListings.map((li) => (
@@ -1671,14 +2268,17 @@ export default function App() {
                         wrongNetwork={wrongNetwork}
                         onBuy={() => {}}
                         onCancel={() => run(async () => {
-                          if (!marketplace) return;
-                          await writeContractAsync({
+                          if (!marketplace || !publicClient) return;
+                          const hash = await writeContractAsync({
                             address: marketplace,
                             abi: feeRightsFixedSaleAbi,
                             functionName: "cancel",
                             args: [li.listingId],
                             chainId: MVP_CHAIN_ID,
                           });
+                          await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
+                          await refetchListings();
+                          setScanEpoch((e) => e + 1);
                         })}
                       />
                     ))}
