@@ -55,7 +55,10 @@ import {
   mergeClankerManual,
   isV4Locker,
   type ClankerManualFields,
+  type ClankerTokenDetail,
 } from "./lib/clankerDetail";
+import { clankerLockerV4Abi } from "./lib/clankerLockerV4Abi";
+import { CLANKER_V4_DEFAULT_LOCKER } from "./lib/clankerLockers";
 import { bankrEscrowAddressFromEnv, clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
 import { resolveReceiptRedeemEscrow } from "./lib/receiptRedeemEscrow";
 import {
@@ -2049,30 +2052,155 @@ export default function App() {
       }
 
       const merged = mergeCreatorFeeRows(bankrRowsLocal, clankerRows);
-      const enriched = await Promise.all(
-        merged.map(async (row) => {
+      // Phase 1: API enrichment — try raw public API fields, then authenticated API
+      const phase1 = await Promise.all(
+        merged.map(async (row): Promise<Record<string, unknown>> => {
           if (row.__launchVenue !== "Clanker") return row;
           const ta = rowLaunchedToken(row);
           if (!ta) return row;
-          try {
-            const detail = await fetchClankerTokenDetail(ta);
-            if (!detail) return { ...row, __clankerDetailFailed: true };
-            const locker = clankerLockerFromDetail(detail);
-            const pool = clankerPoolFromDetail(detail);
-            const paired = clankerPairedFromDetail(detail);
-            if (!pool) return { ...row, __clankerDetailFailed: true };
+
+          // Raw public API response (search-creator) may already include pool_address
+          const rawPool = clankerPoolFromDetail(row as unknown as ClankerTokenDetail);
+          const rawLocker = clankerLockerFromDetail(row as unknown as ClankerTokenDetail);
+          if (rawPool) {
             return {
               ...row,
-              ...(locker ? { __clankerLocker: locker } : {}),
-              __clankerPool: pool,
-              ...(paired ? { __clankerPaired: paired } : {}),
+              ...(rawLocker ? { __clankerLocker: rawLocker } : {}),
+              __clankerPool: rawPool,
             };
-          } catch {
-            return { ...row, __clankerDetailFailed: true };
           }
+
+          // Try authenticated API (requires CLANKER_API_KEY on server)
+          try {
+            const detail = await fetchClankerTokenDetail(ta);
+            if (detail) {
+              const locker = clankerLockerFromDetail(detail);
+              const pool = clankerPoolFromDetail(detail);
+              const paired = clankerPairedFromDetail(detail);
+              if (pool) {
+                return {
+                  ...row,
+                  ...(locker ? { __clankerLocker: locker } : {}),
+                  __clankerPool: pool,
+                  ...(paired ? { __clankerPaired: paired } : {}),
+                };
+              }
+            }
+          } catch { /* ignore */ }
+
+          // Mark for on-chain detection
+          return { ...row, __clankerNeedsDetect: true };
         }),
       );
-      setBankrRows(enriched);
+
+      // Show results immediately so the UI isn't blank while on-chain detection runs
+      setBankrRows(phase1);
+
+      // Phase 2: batch on-chain detection for tokens still unresolved
+      const detectTargets = phase1
+        .filter((r) => r.__clankerNeedsDetect)
+        .map((r) => rowLaunchedToken(r))
+        .filter((ta): ta is Address => ta !== null);
+
+      if (detectTargets.length > 0 && publicClient) {
+        try {
+          // Detect v4 tokens via tokenRewards() — one multicall for all
+          const v4Calls = await publicClient.multicall({
+            contracts: detectTargets.map((ta) => ({
+              address: CLANKER_V4_DEFAULT_LOCKER as Address,
+              abi: clankerLockerV4Abi,
+              functionName: "tokenRewards" as const,
+              args: [ta] as const,
+            })),
+            allowFailure: true,
+          });
+
+          const v4Set = new Set<string>();
+          for (let i = 0; i < detectTargets.length; i++) {
+            const r = v4Calls[i];
+            if (
+              r.status === "success" &&
+              r.result &&
+              (r.result as { positionId: bigint }).positionId > 0n
+            ) {
+              v4Set.add(detectTargets[i].toLowerCase());
+            }
+          }
+
+          // For non-v4 tokens, try Uniswap V3 factory (WETH pair, common fee tiers)
+          const v3Targets = detectTargets.filter((ta) => !v4Set.has(ta.toLowerCase()));
+          const poolMap = new Map<string, Address>();
+
+          if (v3Targets.length > 0) {
+            const UNI_V3_FACTORY = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD" as Address;
+            const uniV3FactoryAbi = [
+              {
+                type: "function" as const,
+                name: "getPool",
+                stateMutability: "view" as const,
+                inputs: [
+                  { name: "tokenA", type: "address" as const },
+                  { name: "tokenB", type: "address" as const },
+                  { name: "fee", type: "uint24" as const },
+                ],
+                outputs: [{ name: "pool", type: "address" as const }],
+              },
+            ] as const;
+            const FEE_TIERS = [10000, 3000, 500] as const;
+            const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+
+            const poolCalls = await publicClient.multicall({
+              contracts: v3Targets.flatMap((ta) =>
+                FEE_TIERS.map((fee) => ({
+                  address: UNI_V3_FACTORY,
+                  abi: uniV3FactoryAbi,
+                  functionName: "getPool" as const,
+                  args: [ta, WETH_BASE as Address, fee] as const,
+                })),
+              ),
+              allowFailure: true,
+            });
+
+            for (let i = 0; i < v3Targets.length; i++) {
+              for (let j = 0; j < FEE_TIERS.length; j++) {
+                const r = poolCalls[i * FEE_TIERS.length + j];
+                if (
+                  r.status === "success" &&
+                  r.result &&
+                  (r.result as string) !== ZERO_ADDR
+                ) {
+                  poolMap.set(v3Targets[i].toLowerCase(), r.result as Address);
+                  break;
+                }
+              }
+            }
+          }
+
+          // Apply on-chain detection results to rows
+          setBankrRows(
+            phase1.map((row) => {
+              if (!row.__clankerNeedsDetect) return row;
+              const ta = rowLaunchedToken(row);
+              if (!ta) return { ...row, __clankerDetailFailed: true };
+              const { __clankerNeedsDetect: _d, ...rest } = row;
+              const taLower = ta.toLowerCase();
+              if (v4Set.has(taLower)) return { ...rest, __clankerLocker: CLANKER_V4_DEFAULT_LOCKER };
+              const pool = poolMap.get(taLower);
+              if (pool) return { ...rest, __clankerPool: pool };
+              return { ...rest, __clankerDetailFailed: true };
+            }),
+          );
+        } catch {
+          // On-chain detection failed — clear markers and show what we have
+          setBankrRows(
+            phase1.map((row) => {
+              if (!row.__clankerNeedsDetect) return row;
+              const { __clankerNeedsDetect: _d, ...rest } = row;
+              return { ...rest, __clankerDetailFailed: true };
+            }),
+          );
+        }
+      }
     } catch (e) {
       setBankrErr(
         e instanceof Error
@@ -2082,7 +2210,7 @@ export default function App() {
     } finally {
       setBankrLoading(false);
     }
-  }, [address]);
+  }, [address, publicClient]);
 
   const refreshProfile = useCallback(() => {
     void loadBankrLaunches();
