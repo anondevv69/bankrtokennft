@@ -442,12 +442,62 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
     (position && typeof position.factoryName === "string" && position.factoryName.trim())
       ? position.factoryName.trim()
       : (meta.name?.trim() || null);
+
+  const t0addr = useMemo(() => {
+    if (!position || typeof position.token0 !== "string") return undefined;
+    if (!isAddress(position.token0, { strict: false })) return undefined;
+    try {
+      return getAddress(position.token0);
+    } catch {
+      return undefined;
+    }
+  }, [position]);
+  const t1addr = useMemo(() => {
+    if (!position || typeof position.token1 !== "string") return undefined;
+    if (!isAddress(position.token1, { strict: false })) return undefined;
+    try {
+      return getAddress(position.token1);
+    } catch {
+      return undefined;
+    }
+  }, [position]);
+
+  const { data: sym0 } = useReadContract({
+    address: isBfrr ? t0addr : undefined,
+    abi: erc20SymbolAbi,
+    functionName: "symbol",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: isBfrr && Boolean(t0addr) && !wrongNetwork },
+  });
+  const { data: sym1 } = useReadContract({
+    address: isBfrr ? t1addr : undefined,
+    abi: erc20SymbolAbi,
+    functionName: "symbol",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: isBfrr && Boolean(t1addr) && !wrongNetwork },
+  });
+
+  const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
+  const symbol1 = typeof sym1 === "string" && sym1.trim() ? sym1.trim() : null;
+
   const pairLabel =
     position && typeof position.token0 === "string" && typeof position.token1 === "string"
       ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
       : null;
+
+  const tickerLine =
+    symbol0 && symbol1
+      ? `${symbol0} / ${symbol1}`
+      : (meta.pairTrait?.trim() || pairLabel);
+
   const imSeller = address !== undefined && isAddress(li.seller) &&
     getAddress(li.seller) === getAddress(address);
+
+  const sellerAddr = isAddress(li.seller) ? getAddress(li.seller) : li.seller;
+  const sellerScan = isAddress(li.seller) ? `https://basescan.org/address/${getAddress(li.seller)}` : undefined;
+  const nftScan = isBfrr
+    ? `https://basescan.org/nft/${getAddress(li.collection)}/${li.tokenId.toString()}`
+    : undefined;
 
   return (
     <div className="listing-card">
@@ -461,18 +511,80 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         </div>
       )}
       <div className="listing-card__body">
-        {receiptTitle && <div className="listing-card__headline">{receiptTitle}</div>}
-        {pairLabel && <div className="listing-card__sub mono">{pairLabel}</div>}
+        <div className="listing-card__headline" title={receiptTitle || meta.name || undefined}>
+          {receiptTitle || meta.name?.trim() || (isBfrr ? "Fee rights receipt" : "Listing")}
+        </div>
+        {isBfrr && meta.name?.trim() && receiptTitle?.trim() && meta.name.trim() !== receiptTitle.trim() && (
+          <div className="listing-card__nft-name" title={meta.name}>{meta.name.trim()}</div>
+        )}
+        {isBfrr && tickerLine && (
+          <div
+            className={`listing-card__tickers${symbol0 && symbol1 ? "" : " mono"}`}
+            title={t0addr && t1addr ? `${t0addr} ↔ ${t1addr}` : tickerLine}
+          >
+            {tickerLine}
+          </div>
+        )}
+        {isBfrr && t0addr && t1addr && (
+          <div className="listing-card__token-addrs">
+            <a
+              className="listing-card__token-addr mono"
+              href={`https://basescan.org/address/${t0addr}`}
+              target="_blank"
+              rel="noreferrer"
+              title={t0addr}
+            >
+              {symbol0 ? `${symbol0} ` : ""}{shortAddr(t0addr)}
+            </a>
+            <a
+              className="listing-card__token-addr mono"
+              href={`https://basescan.org/address/${t1addr}`}
+              target="_blank"
+              rel="noreferrer"
+              title={t1addr}
+            >
+              {symbol1 ? `${symbol1} ` : ""}{shortAddr(t1addr)}
+            </a>
+          </div>
+        )}
         <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__meta">
           <div className="listing-card__meta-row">
-            <span>From</span>
-            <span className="mono">{shortAddr(li.seller)}</span>
+            <span>Seller</span>
+            {sellerScan ? (
+              <a className="mono listing-card__meta-link" href={sellerScan} target="_blank" rel="noreferrer" title={sellerAddr}>
+                {shortAddr(sellerAddr)}
+              </a>
+            ) : (
+              <span className="mono" title={sellerAddr}>{shortAddr(sellerAddr)}</span>
+            )}
           </div>
           <div className="listing-card__meta-row">
-            <span>Item</span>
-            <span className="mono">{serial !== undefined ? `#${String(serial)}` : shortAddr(li.tokenId.toString())}</span>
+            <span>{isBfrr ? "Receipt" : "Token"}</span>
+            {nftScan ? (
+              <a className="mono listing-card__meta-link" href={nftScan} target="_blank" rel="noreferrer" title={`Token ID ${li.tokenId.toString()}`}>
+                {serial !== undefined ? `#${String(serial)}` : `id ${li.tokenId.toString()}`}
+              </a>
+            ) : (
+              <span className="mono" title={li.tokenId.toString()}>
+                {serial !== undefined ? `#${String(serial)}` : shortAddr(li.tokenId.toString())}
+              </span>
+            )}
           </div>
+          {!isBfrr && isAddress(li.collection) && (
+            <div className="listing-card__meta-row">
+              <span>Contract</span>
+              <a
+                className="mono listing-card__meta-link"
+                href={`https://basescan.org/address/${getAddress(li.collection)}`}
+                target="_blank"
+                rel="noreferrer"
+                title={getAddress(li.collection)}
+              >
+                {shortAddr(getAddress(li.collection))}
+              </a>
+            </div>
+          )}
         </div>
         <div className="listing-card__actions">
           {imSeller ? (
