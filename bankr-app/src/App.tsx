@@ -35,7 +35,14 @@ import {
 } from "./receiptScan";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId, rowPoolIdHex, launchRowLabel, launchedTokenFromWethPair, WETH_BASE } from "./lib/escrowArgs";
+import {
+  formatBankrPoolLabels,
+  normalizePoolId,
+  rowPoolIdHex,
+  launchRowLabel,
+  launchedTokenFromWethPair,
+  WETH_BASE,
+} from "./lib/escrowArgs";
 import {
   formatListFlowError,
   isMarketplaceApproved,
@@ -824,17 +831,32 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     chainId: MVP_CHAIN_ID,
     query: { enabled: Boolean(t1addr) },
   });
+  const { data: nm0 } = useReadContract({
+    address: t0addr,
+    abi: erc20NameAbi,
+    functionName: "name",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: Boolean(t0addr) },
+  });
+  const { data: nm1 } = useReadContract({
+    address: t1addr,
+    abi: erc20NameAbi,
+    functionName: "name",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: Boolean(t1addr) },
+  });
 
   const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
   const symbol1 = typeof sym1 === "string" && sym1.trim() ? sym1.trim() : null;
+  const name0 = typeof nm0 === "string" && nm0.trim() ? nm0.trim() : null;
+  const name1 = typeof nm1 === "string" && nm1.trim() ? nm1.trim() : null;
 
-  const launchedSymbol = useMemo(() => {
-    if (!t0addr || !t1addr) return null;
-    const weth = WETH_BASE.toLowerCase();
-    if (t0addr.toLowerCase() === weth) return symbol1;
-    if (t1addr.toLowerCase() === weth) return symbol0;
-    return symbol0 && symbol1 ? `${symbol0} / ${symbol1}` : symbol0 || symbol1;
-  }, [t0addr, t1addr, symbol0, symbol1]);
+  const poolLabelsCard = useMemo(
+    () => formatBankrPoolLabels(t0addr, t1addr, symbol0, symbol1, name0, name1),
+    [t0addr, t1addr, symbol0, symbol1, name0, name1],
+  );
+
+  const launchedSymbol = poolLabelsCard?.tokenName || poolLabelsCard?.ticker?.split(" / ").pop() || null;
 
   const factoryName =
     position && typeof position.factoryName === "string" && position.factoryName.trim()
@@ -849,9 +871,8 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
       : null;
 
   const tickerLine =
-    symbol0 && symbol1
-      ? `${symbol0} / ${symbol1}`
-      : (meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : pairLabel);
+    poolLabelsCard?.ticker ||
+    (meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : pairLabel);
 
   const serialLabel = serial !== undefined ? String(serial) : null;
   const headline = launchedSymbol
@@ -1123,47 +1144,21 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   const name0 = typeof nm0 === "string" && nm0.trim() ? nm0.trim() : null;
   const name1 = typeof nm1 === "string" && nm1.trim() ? nm1.trim() : null;
 
-  const pairLabel =
-    position && typeof position.token0 === "string" && typeof position.token1 === "string"
-      ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
-      : null;
+  const poolLabels = useMemo(
+    () => formatBankrPoolLabels(t0addr, t1addr, symbol0, symbol1, name0, name1),
+    [t0addr, t1addr, symbol0, symbol1, name0, name1],
+  );
 
-  const bankrPairLine =
-    bankrFeesMeta?.token0Label && bankrFeesMeta?.token1Label
-      ? `${String(bankrFeesMeta.token0Label).trim()} / ${String(bankrFeesMeta.token1Label).trim()}`
-      : null;
-
-  const tickerLine =
-    symbol0 && symbol1
-      ? `${symbol0} / ${symbol1}`
-      : (bankrPairLine || meta.pairTrait?.trim() || pairLabel);
-
-  const pairSymbols = symbol0 && symbol1 ? `${symbol0} / ${symbol1}` : null;
   const tickerDisplay =
-    pairSymbols || tickerLine || bankrPairLine || (receiptReadsEnabled ? "—" : null);
+    poolLabels?.ticker || meta.pairTrait?.trim() || (receiptReadsEnabled ? "—" : null);
 
-  const launchedContract = useMemo((): Address | undefined => {
-    if (bankrLaunched) return bankrLaunched;
-    if (!t0addr || !t1addr) return undefined;
-    const w = WETH_BASE.toLowerCase();
-    if (t0addr.toLowerCase() === w) return t1addr;
-    if (t1addr.toLowerCase() === w) return t0addr;
-    return undefined;
-  }, [bankrLaunched, t0addr, t1addr]);
+  const tokenNameDisplay =
+    poolLabels?.tokenName ||
+    bankrFeesMeta?.symbol?.trim() ||
+    bankrFeesMeta?.name?.trim() ||
+    null;
 
-  const tokenNameDisplay = useMemo(() => {
-    if (!launchedContract || !t0addr || !t1addr) {
-      return bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || meta.name?.trim() || null;
-    }
-    const launched = getAddress(launchedContract);
-    if (getAddress(t0addr) === launched) {
-      return name0?.trim() || symbol0 || bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || null;
-    }
-    if (getAddress(t1addr) === launched) {
-      return name1?.trim() || symbol1 || bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || null;
-    }
-    return name0?.trim() || name1?.trim() || symbol0 || symbol1 || null;
-  }, [launchedContract, t0addr, t1addr, name0, name1, symbol0, symbol1, bankrFeesMeta, meta.name]);
+  const launchedContract = poolLabels?.launched ?? bankrLaunched;
 
   const cardAlt =
     tickerDisplay ||

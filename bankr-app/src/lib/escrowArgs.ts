@@ -56,6 +56,69 @@ function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
 }
 
+function isWethHumanLabel(s: string | null | undefined): boolean {
+  if (!s?.trim()) return false;
+  const t = s.trim().toLowerCase();
+  return t === "weth" || t === "wrapped ether" || t.startsWith("wrapped ether ");
+}
+
+export type BankrPoolLabels = {
+  /** Always `WETH / {launched}` when the pool is WETH + launch token. */
+  ticker: string;
+  /** Launched token only — never WETH / “Wrapped Ether”. */
+  tokenName: string | null;
+  launched: Address;
+};
+
+/** Consistent pool labels for listings and BFRR cards (WETH first, then launch ticker/name). */
+export function formatBankrPoolLabels(
+  token0: Address | undefined,
+  token1: Address | undefined,
+  symbol0: string | null | undefined,
+  symbol1: string | null | undefined,
+  name0?: string | null,
+  name1?: string | null,
+): BankrPoolLabels | null {
+  if (!token0 || !token1) return null;
+  const w = WETH_BASE.toLowerCase();
+  const t0 = getAddress(token0).toLowerCase();
+  const t1 = getAddress(token1).toLowerCase();
+  const s0 = symbol0?.trim() || null;
+  const s1 = symbol1?.trim() || null;
+  const n0 = name0?.trim() || null;
+  const n1 = name1?.trim() || null;
+
+  if (t0 === w && t1 !== w) {
+    const launched = getAddress(token1);
+    const launchedSym = s1 || shortAddr(launched);
+    const launchedName = n1 && !isWethHumanLabel(n1) ? n1 : null;
+    return {
+      ticker: `WETH / ${launchedSym}`,
+      tokenName: launchedName || s1,
+      launched,
+    };
+  }
+  if (t1 === w && t0 !== w) {
+    const launched = getAddress(token0);
+    const launchedSym = s0 || shortAddr(launched);
+    const launchedName = n0 && !isWethHumanLabel(n0) ? n0 : null;
+    return {
+      ticker: `WETH / ${launchedSym}`,
+      tokenName: launchedName || s0,
+      launched,
+    };
+  }
+
+  const ticker =
+    s0 && s1 ? `${s0} / ${s1}` : `${shortAddr(getAddress(token0))} / ${shortAddr(getAddress(token1))}`;
+  const tokenName =
+    (n0 && !isWethHumanLabel(n0) ? n0 : null) ||
+    (n1 && !isWethHumanLabel(n1) ? n1 : null) ||
+    s0 ||
+    s1;
+  return { ticker, tokenName, launched: getAddress(token0) };
+}
+
 /** Primary label for a fee / launch row in the UI (symbol + contract, never bare numeric ids alone). */
 export function launchRowLabel(row: Record<string, unknown>): string {
   const ta = rowLaunchedToken(row);
