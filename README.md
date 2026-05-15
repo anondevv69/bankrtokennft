@@ -202,13 +202,18 @@ Set `INITIAL_FEE_MANAGERS` to the **actual** Bankr (or compatible `IBankrFees`) 
 
 Foundry automatically loads **`fee-rights-exchange/.env`**. If that file sets `ESCROW_INITIAL_OWNER` to your multisig, the script will **transfer escrow ownership** to that address after allowlisting. To keep the deployer as owner, remove or comment out `ESCROW_INITIAL_OWNER` for this run.
 
+**Important**
+
+- **`INITIAL_FEE_MANAGERS` must be real Base mainnet contracts** — exact **`0x` + 40 hex characters** each (comma-separated, no spaces unless quoted). Strings like `0xYourFeeManager1` are placeholders and **will revert** in `vm.parseAddress`.
+- **zsh:** if you paste lines that start with `#`, zsh may try to run them (`command not found: #`). Put comments on their own line after commands, or omit comments when pasting into the terminal.
+- **Bankr + Clanker:** allowlist **both** fee manager addresses in one CSV if both implement the same `IBankrFees`-style surface on Base. One deploy sets **`FACTORY_NAME`** for **every** manager in that list; rename the Clanker manager after deploy if you want receipts to say **Clanker** (see step **2b**).
+
 ```shell
 cd fee-rights-exchange
-source .env   # PRIVATE_KEY, and e.g. BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...
+source .env
 
 export FACTORY_NAME="Bankr"
-export INITIAL_FEE_MANAGERS=0xYourMainnetFeeManager,0xOptionalSecond
-# Optional — override final owner for this run only (else see `ESCROW_INITIAL_OWNER` in `.env`).
+export INITIAL_FEE_MANAGERS="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 forge script script/DeployBankrEscrowV3.s.sol \
   --rpc-url "$BASE_MAINNET_RPC_URL" \
@@ -220,6 +225,17 @@ forge script script/DeployBankrEscrowV3.s.sol \
   --broadcast \
   --verify \
   --etherscan-api-key "$ETHERSCAN_API_KEY"
+```
+
+Replace `0xaaaa…` / `0xbbbb…` with your **real** Bankr and Clanker (or other) fee manager addresses from the same discovery path you use for `prepareDeposit` (token-fees / internal registry — never guess).
+
+**2b. Optional — different receipt label for Clanker’s fee manager**
+
+After deploy, escrow owner:
+
+```shell
+cast send <ESCROW_ADDRESS> "setFactoryName(address,string)" <CLANKER_FEE_MANAGER_ADDRESS> "Clanker" \
+  --rpc-url "$BASE_MAINNET_RPC_URL" --private-key "$PRIVATE_KEY"
 ```
 
 Use a [Basescan API key](https://basescan.org/apis) as `ETHERSCAN_API_KEY` (Foundry passes it to the Blockscout-compatible verifier for Base).
