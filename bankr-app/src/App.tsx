@@ -151,6 +151,17 @@ function svgTextSafe(s: string, maxLen: number): string {
     .join("");
 }
 
+/** Fix common mojibake from on-chain SVG / UTF-8 metadata in the UI. */
+function normalizeDisplayText(raw: string): string {
+  return raw
+    .replace(/\uFFFD/g, "")
+    .replace(/â€"/g, "—")
+    .replace(/â\x80\x94/g, "—")
+    .replace(/â[\u0080-\u009F]?/g, "—")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Client-side preview when `tokenURI` has no image — not on-chain metadata. */
 function listingCardPlaceholderSvg(line1: string, line2: string): string {
   const a = svgTextSafe(line1, 44) || "Fee rights receipt";
@@ -666,11 +677,101 @@ function useActiveListingsSearchEnrichment(
 
 // ── BfrrCard ─────────────────────────────────────────────────────────────────
 
-function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay }: {
+function BfrrPreviewModal({
+  open,
+  onClose,
+  imgSrc,
+  imgBroken,
+  onImgError,
+  headline,
+  tickerLine,
+  subline,
+  detailLines,
+  basescanNft,
+}: {
+  open: boolean;
+  onClose: () => void;
+  imgSrc: string | null;
+  imgBroken: boolean;
+  onImgError: () => void;
+  headline: string;
+  tickerLine: string | null;
+  subline: string | null;
+  detailLines: string[];
+  basescanNft: string;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="settings-overlay bfrr-preview-overlay" onClick={onClose} role="presentation">
+      <div
+        className="settings-sheet bfrr-preview-sheet"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bfrr-preview-title"
+      >
+        <div className="settings-sheet__head">
+          <h3 id="bfrr-preview-title">Receipt preview</h3>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        {imgSrc && !imgBroken ? (
+          <img
+            className="bfrr-preview-sheet__img"
+            src={imgSrc}
+            alt={headline}
+            decoding="async"
+            onError={onImgError}
+          />
+        ) : (
+          <div className="bfrr-preview-sheet__img-placeholder muted">No image available</div>
+        )}
+        <p className="bfrr-preview-sheet__headline">{headline}</p>
+        {tickerLine && (
+          <p className="bfrr-preview-sheet__tickers">{tickerLine}</p>
+        )}
+        {subline && <p className="bfrr-preview-sheet__sub muted">{subline}</p>}
+        {detailLines.length > 0 && (
+          <ul className="bfrr-preview-sheet__details">
+            {detailLines.map((line) => (
+              <li key={line} className="mono muted">
+                {line}
+              </li>
+            ))}
+          </ul>
+        )}
+        <a
+          className="btn btn-ghost btn-sm"
+          href={basescanNft}
+          target="_blank"
+          rel="noreferrer"
+          style={{ marginTop: "0.75rem" }}
+        >
+          Open on BaseScan
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, expandable }: {
   tokenId: string; collection: Address; selected: boolean;
   onClick?: () => void;
   /** When true, render a non-interactive preview (e.g. next to profile actions). */
   staticDisplay?: boolean;
+  /** Profile rows: click image / “View receipt” for full-size preview (default on when static). */
+  expandable?: boolean;
 }) {
   const tid = useMemo(() => { try { return BigInt(id); } catch { return null; } }, [id]);
 
@@ -730,10 +831,20 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay }:
   const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
   const symbol1 = typeof sym1 === "string" && sym1.trim() ? sym1.trim() : null;
 
-  const title =
-    (position && typeof position.factoryName === "string" && position.factoryName.trim())
-      ? position.factoryName.trim()
-      : (meta.name?.trim() || "Fee rights receipt");
+  const launchedSymbol = useMemo(() => {
+    if (!t0addr || !t1addr) return null;
+    const weth = WETH_BASE.toLowerCase();
+    if (t0addr.toLowerCase() === weth) return symbol1;
+    if (t1addr.toLowerCase() === weth) return symbol0;
+    return symbol0 && symbol1 ? `${symbol0} / ${symbol1}` : symbol0 || symbol1;
+  }, [t0addr, t1addr, symbol0, symbol1]);
+
+  const factoryName =
+    position && typeof position.factoryName === "string" && position.factoryName.trim()
+      ? normalizeDisplayText(position.factoryName.trim())
+      : null;
+
+  const metaName = meta.name?.trim() ? normalizeDisplayText(meta.name.trim()) : null;
 
   const pairLabel =
     position && typeof position.token0 === "string" && typeof position.token1 === "string"
@@ -743,72 +854,133 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay }:
   const tickerLine =
     symbol0 && symbol1
       ? `${symbol0} / ${symbol1}`
-      : (meta.pairTrait?.trim() || pairLabel);
+      : (meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : pairLabel);
+
+  const serialLabel = serial !== undefined ? String(serial) : null;
+  const headline = launchedSymbol
+    ? `${launchedSymbol} fee rights`
+    : tickerLine || metaName || "Fee rights receipt";
+  const subline = [
+    serialLabel ? `BFRR #${serialLabel}` : null,
+    factoryName && factoryName.toLowerCase() !== "bankr" ? factoryName : factoryName ? "Bankr" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const descRaw = meta.description?.trim() ? normalizeDisplayText(meta.description.trim()) : null;
+  const showCardDesc =
+    Boolean(descRaw) &&
+    !staticDisplay &&
+    descRaw !== headline &&
+    descRaw !== tickerLine &&
+    !/^bankr fee rights receipt/i.test(descRaw);
+
+  const detailLines = useMemo(() => {
+    const lines: string[] = [];
+    if (tickerLine) lines.push(`Pair: ${tickerLine}`);
+    if (t0addr && t1addr) lines.push(`Pool: ${shortAddr(t0addr)} / ${shortAddr(t1addr)}`);
+    if (serialLabel) lines.push(`Serial #${serialLabel}`);
+    lines.push(`Token ID: ${id}`);
+    if (descRaw && !/^bankr fee rights receipt/i.test(descRaw)) lines.push(descRaw);
+    return lines;
+  }, [tickerLine, t0addr, t1addr, serialLabel, id, descRaw]);
 
   const basescanNft = `https://basescan.org/nft/${collection}/${id}`;
+  const canExpand = expandable ?? staticDisplay;
 
   const [imgBroken, setImgBroken] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   useEffect(() => {
     setImgBroken(false);
   }, [imgSrc]);
 
+  const openPreview = (e?: { stopPropagation?: () => void }) => {
+    e?.stopPropagation?.();
+    setPreviewOpen(true);
+  };
+
+  const imgBlock = imgSrc && !imgBroken ? (
+    <img className="bfrr-card__img" src={imgSrc}
+      alt={headline} loading="lazy" decoding="async"
+      onError={() => setImgBroken(true)} />
+  ) : (
+    <div className="bfrr-card__img-placeholder">
+      <span className="bfrr-card__badge">BFRR</span>
+      {meta.remoteLoading && !imgSrc ? (
+        <span className="bfrr-card__serial"><span className="spinner" /> Metadata…</span>
+      ) : (
+        serialLabel !== null && <span className="bfrr-card__serial">#{serialLabel}</span>
+      )}
+    </div>
+  );
+
   const body = (
     <>
-      {imgSrc && !imgBroken ? (
-        <img className="bfrr-card__img" src={imgSrc}
-          alt={title} loading="lazy" decoding="async"
-          onError={() => setImgBroken(true)} />
-      ) : (
-        <div className="bfrr-card__img-placeholder">
-          <span className="bfrr-card__badge">BFRR</span>
-          {meta.remoteLoading && !imgSrc ? (
-            <span className="bfrr-card__serial"><span className="spinner" /> Metadata…</span>
-          ) : (
-            serial !== undefined && <span className="bfrr-card__serial">#{String(serial)}</span>
-          )}
-        </div>
-      )}
+      {canExpand ? (
+        <button type="button" className="bfrr-card__preview-hit" onClick={openPreview}
+          aria-label={`View receipt for ${headline}`}>
+          {imgBlock}
+          <span className="bfrr-card__expand-hint">Tap to enlarge</span>
+        </button>
+      ) : imgBlock}
       <div className="bfrr-card__footer">
-        <div className="bfrr-card__title" title={title}>{title}</div>
-        {tickerLine && (
+        <div className="bfrr-card__headline" title={headline}>{headline}</div>
+        {tickerLine && tickerLine !== headline && (
           <div className={`bfrr-card__tickers${symbol0 && symbol1 ? "" : " mono"}`} title={tickerLine}>
             {tickerLine}
           </div>
         )}
-        {meta.description && (
-          <div className="bfrr-card__desc" title={meta.description}>{meta.description}</div>
-        )}
+        {subline && <div className="bfrr-card__subline muted">{subline}</div>}
         <div className="bfrr-card__id-row">
           <span className="bfrr-card__id mono" title={`Token ID ${id}`}>
-            {serial !== undefined ? `#${String(serial)}` : id.slice(0, 6) + "…" + id.slice(-4)}
+            {serialLabel !== null ? `#${serialLabel}` : id.slice(0, 6) + "…" + id.slice(-4)}
           </span>
-          <span
-            className="bfrr-card__scan"
-            role="link"
-            tabIndex={0}
-            title="Open on BaseScan"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(basescanNft, "_blank", "noopener,noreferrer");
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
+          <span className="bfrr-card__id-actions">
+            {canExpand && (
+              <button type="button" className="bfrr-card__view-btn link-btn" onClick={openPreview}>View</button>
+            )}
+            <span
+              className="bfrr-card__scan"
+              role="link"
+              tabIndex={0}
+              title="Open on BaseScan"
+              onClick={(e) => {
                 e.stopPropagation();
                 window.open(basescanNft, "_blank", "noopener,noreferrer");
-              }
-            }}
-          >
-            BaseScan
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.open(basescanNft, "_blank", "noopener,noreferrer");
+                }
+              }}
+            >
+              BaseScan
+            </span>
           </span>
         </div>
       </div>
+      {canExpand && (
+        <BfrrPreviewModal
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          imgSrc={imgSrc}
+          imgBroken={imgBroken}
+          onImgError={() => setImgBroken(true)}
+          headline={headline}
+          tickerLine={tickerLine}
+          subline={subline || null}
+          detailLines={detailLines}
+          basescanNft={basescanNft}
+        />
+      )}
     </>
   );
 
   if (staticDisplay) {
     return (
-      <div className={`bfrr-card bfrr-card--static${selected ? " active" : ""}`}>
+      <div className={`bfrr-card bfrr-card--static bfrr-card--profile${selected ? " active" : ""}`}>
         {body}
       </div>
     );
@@ -820,6 +992,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay }:
     </button>
   );
 }
+
 
 // ── ListingCard ───────────────────────────────────────────────────────────────
 
