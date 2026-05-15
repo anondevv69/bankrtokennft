@@ -115,7 +115,7 @@ function deriveNext(
     return {
       kind: "blocked",
       reason:
-        "This build’s escrow isn’t allowlisted for this pool’s fee manager. Set VITE_ESCROW_ADDRESS to your live BankrEscrowV3 and rebuild, or ask the escrow owner to allowlist this fee manager.",
+        "This build’s escrow isn’t allowlisted for this pool’s fee manager. Set VITE_ESCROW_ADDRESS to your live escrow contract and rebuild, or ask the escrow owner to allowlist this fee manager.",
     };
   }
   const u = user.toLowerCase();
@@ -135,7 +135,7 @@ function deriveNext(
     return {
       kind: "blocked",
       reason:
-        "Your wallet has no fee-manager shares for this pool. You must be the current beneficiary on-chain (check Bankr / claimable-fees).",
+        "Your wallet has no fee-manager shares for this pool. You must be the current beneficiary on-chain (check claimable fees for your pool).",
     };
   }
   return { kind: "prepare" };
@@ -179,7 +179,7 @@ async function readWalletChainId(config: Config): Promise<number | undefined> {
 function EscrowStepper({ step }: { step: 1 | 2 | 3 }) {
   const items: { n: 1 | 2 | 3; title: string; hint: string }[] = [
     { n: 1, title: "Prepare", hint: "Escrow contract records your pool" },
-    { n: 2, title: "Transfer fees", hint: "Bankr fee contract → beneficiary points at escrow" },
+    { n: 2, title: "Transfer fees", hint: "Fee contract → beneficiary points at escrow" },
     { n: 3, title: "Finalize", hint: "Escrow mints your receipt (BFRR)" },
   ];
   return (
@@ -230,7 +230,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     const pid = normalizePoolId(row.poolId);
     const launched = rowLaunchedToken(row);
     if (!pid || !launched) {
-      setNext({ kind: "blocked", reason: "This row is missing a valid poolId or tokenAddress from Bankr." });
+      setNext({ kind: "blocked", reason: "This row is missing a valid poolId or tokenAddress from launch data." });
       return;
     }
     setPoolId(pid);
@@ -473,14 +473,14 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
         <div className="settings-sheet__head">
-          <h3>List on Bankr Sale</h3>
+          <h3>List for sale</h3>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             ✕
           </button>
         </div>
 
         <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.65rem" }}>
-          <strong>{label}</strong> — escrow and Bankr need <strong>up to three separate Base transactions</strong>. Confirm each on-chain before the next step appears.
+          <strong>{label}</strong> — escrow uses <strong>up to three separate Base transactions</strong>. Confirm each on-chain before the next step appears.
         </p>
 
         {wrongChain && (
@@ -528,8 +528,8 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
             <p className="err">{next.reason}</p>
             {/beneficiary/i.test(next.reason) && (
               <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.55rem", lineHeight: 1.45 }}>
-                Bankr builds that transaction only if <span className="mono">{userAddress}</span> is the wallet that{" "}
-                <strong>currently</strong> receives trading fees for the token you entered. Fix: connect the launch / fee-recipient wallet (on Base), or re-check the <strong>launched token address</strong> and <strong>pool id</strong> match that launch. If Bankr still shows a different “fee wallet,” complete fee setup there first, or ask Bankr support which address must sign.
+                The transfer step is built only if <span className="mono">{userAddress}</span> is the wallet that{" "}
+                <strong>currently</strong> receives trading fees for the token you entered. Connect the fee-recipient wallet on Base, or re-check the <strong>launched token address</strong> and <strong>pool id</strong> match your pool. If another address still receives fees on-chain, complete fee setup for that address first.
               </p>
             )}
           </>
@@ -579,11 +579,6 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
           </p>
         )}
 
-        <p className="muted" style={{ fontSize: "0.72rem", marginTop: "0.75rem" }}>
-          <a href="https://docs.bankr.bot/token-launching/transferring-fees/" target="_blank" rel="noreferrer">
-            Help
-          </a>
-        </p>
       </div>
     </div>
   );
