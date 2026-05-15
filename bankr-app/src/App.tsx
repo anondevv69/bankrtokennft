@@ -592,6 +592,11 @@ export default function App() {
     return [...set].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
   }, [scannedIds, manualIds]);
 
+  const idsForWatch = useMemo(
+    () => allTokenIds.filter((id) => id.length > 0 && /^\d+$/.test(id)),
+    [allTokenIds],
+  );
+
   // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
   useEffect(() => {
     if (!isConnected || !address || !collection || !publicClient || wrongNetwork) return;
@@ -655,55 +660,123 @@ export default function App() {
     return set;
   }, [myListings, collection]);
 
+  const ownershipQueries = useQueries({
+    queries: (() => {
+      if (!publicClient || !collection || wrongNetwork || !address) return [];
+      const me = getAddress(address);
+      return idsForWatch.map((id) => ({
+        queryKey: ["bfrr-owner", collection, me, id],
+        queryFn: async () => {
+          if (!publicClient || !collection) return null;
+          try {
+            return await publicClient.readContract({
+              address: collection,
+              abi: erc721Abi,
+              functionName: "ownerOf",
+              args: [BigInt(id)],
+            }) as Address;
+          } catch {
+            return null;
+          }
+        },
+        staleTime: 12_000,
+      }));
+    })(),
+  });
+
+  const ownershipReady =
+    idsForWatch.length === 0 ||
+    ownershipQueries.length === 0 ||
+    ownershipQueries.every((q) => q.status === "success" || q.status === "error");
+
+  const walletOwnedReceiptIds = useMemo(() => {
+    if (!address || !ownershipReady) return [];
+    const me = getAddress(address);
+    const out: string[] = [];
+    for (let i = 0; i < idsForWatch.length; i++) {
+      const q = ownershipQueries[i];
+      if (q.status !== "success" || !q.data) continue;
+      const o = q.data as string;
+      if (!isAddress(o)) continue;
+      try {
+        if (getAddress(o) === me) out.push(idsForWatch[i]);
+      } catch {
+        /* skip */
+      }
+    }
+    return out.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
+  }, [address, idsForWatch, ownershipQueries, ownershipReady]);
+
+  useEffect(() => {
+    if (!ownershipReady || !address) return;
+    const me = getAddress(address);
+    const keepId = (id: string) => {
+      const i = idsForWatch.indexOf(id);
+      if (i < 0) return true;
+      const q = ownershipQueries[i];
+      if (q?.status !== "success" || !q.data) return false;
+      try {
+        return isAddress(q.data as string) && getAddress(q.data as Address) === me;
+      } catch {
+        return false;
+      }
+    };
+    setScannedIds((prev) => prev.filter(keepId));
+    setManualIds((prev) => prev.filter(keepId));
+  }, [ownershipReady, address, idsForWatch, ownershipQueries]);
+
   const unlistedBfrrIds = useMemo(
-    () => allTokenIds.filter((id) => !myListedTokenIds.has(id)),
-    [allTokenIds, myListedTokenIds],
+    () => walletOwnedReceiptIds.filter((id) => !myListedTokenIds.has(id)),
+    [walletOwnedReceiptIds, myListedTokenIds],
   );
 
   const positionQueries = useQueries({
     queries: (() => {
-      if (!publicClient || !collection || wrongNetwork) return [];
-      return allTokenIds
-        .filter((id) => id.length > 0 && /^\d+$/.test(id))
-        .map((id) => ({
-          queryKey: ["bfrr-position-bankr-dedupe", collection, id],
-          queryFn: async () => {
-            if (!publicClient || !collection) return null;
-            try {
-              return await publicClient.readContract({
-                address: collection,
-                abi: bankrFeeRightsReceiptAbi,
-                functionName: "positionOf",
-                args: [BigInt(id)],
-              }) as {
-                feeManager: Address;
-                poolId: Hex;
-                token0: Address;
-                token1: Address;
-                seller: Address;
-                factoryName: string;
-              };
-            } catch {
-              return null;
-            }
-          },
-          staleTime: 15_000,
-        }));
+      if (!publicClient || !collection || wrongNetwork || !ownershipReady) return [];
+      return walletOwnedReceiptIds.map((id) => ({
+        queryKey: ["bfrr-position-bankr-dedupe", collection, id],
+        queryFn: async () => {
+          if (!publicClient || !collection) return null;
+          try {
+            return await publicClient.readContract({
+              address: collection,
+              abi: bankrFeeRightsReceiptAbi,
+              functionName: "positionOf",
+              args: [BigInt(id)],
+            }) as {
+              feeManager: Address;
+              poolId: Hex;
+              token0: Address;
+              token1: Address;
+              seller: Address;
+              factoryName: string;
+            };
+          } catch {
+            return null;
+          }
+        },
+        staleTime: 15_000,
+      }));
     })(),
   });
 
   const bfrrDedupeReady =
-    allTokenIds.length === 0 ||
-    positionQueries.length === 0 ||
-    positionQueries.every((q) => q.status === "success" || q.status === "error");
+    idsForWatch.length === 0 ||
+    (!ownershipReady
+      ? false
+      : walletOwnedReceiptIds.length === 0 ||
+        positionQueries.length === 0 ||
+        positionQueries.every((q) => q.status === "success" || q.status === "error"));
 
   const { heldPoolIds, heldPairTokens } = useMemo(() => {
     const pools = new Set<string>();
     const tokens = new Set<string>();
+    const zeroPool = `0x${"0".repeat(64)}`;
     for (const q of positionQueries) {
       const pos = q.data;
       if (!pos) continue;
-      if (pos.poolId) pools.add(String(pos.poolId).toLowerCase());
+      const pid = String(pos.poolId).toLowerCase();
+      if (pid && pid !== zeroPool) pools.add(pid);
       try {
         tokens.add(getAddress(pos.token0).toLowerCase());
         tokens.add(getAddress(pos.token1).toLowerCase());
@@ -715,7 +788,7 @@ export default function App() {
   }, [positionQueries]);
 
   const bankrRowsNotYetReceived = useMemo(() => {
-    if (allTokenIds.length > 0 && !bfrrDedupeReady) return [];
+    if (idsForWatch.length > 0 && !bfrrDedupeReady) return [];
     if (heldPoolIds.size === 0 && heldPairTokens.size === 0) return bankrRows;
     return bankrRows.filter((row) => {
       const pid = rowPoolIdHex(row);
@@ -724,7 +797,12 @@ export default function App() {
       if (tok && heldPairTokens.has(tok.toLowerCase())) return false;
       return true;
     });
-  }, [bankrRows, heldPoolIds, heldPairTokens, allTokenIds.length, bfrrDedupeReady]);
+  }, [bankrRows, heldPoolIds, heldPairTokens, idsForWatch.length, bfrrDedupeReady]);
+
+  useEffect(() => {
+    if (!ownershipReady || !selectedId) return;
+    if (!walletOwnedReceiptIds.includes(selectedId)) setSelectedId(null);
+  }, [ownershipReady, selectedId, walletOwnedReceiptIds]);
 
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
@@ -1012,7 +1090,7 @@ export default function App() {
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
-                  {!scanning && unlistedBfrrIds.length === 0 && allTokenIds.length === 0 && (
+                  {!scanning && unlistedBfrrIds.length === 0 && ownershipReady && walletOwnedReceiptIds.length === 0 && idsForWatch.length === 0 && (
                     <>
                       <p className="empty">No receipts detected from our recent scan.</p>
                       <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
@@ -1140,7 +1218,7 @@ export default function App() {
                 <p className="muted one-liner">
                   Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
                 </p>
-                {allTokenIds.length > 0 && !bfrrDedupeReady && (
+                {idsForWatch.length > 0 && !bfrrDedupeReady && (
                   <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
                     Matching Bankr fee rows to receipts already in this wallet…
                   </p>
