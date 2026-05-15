@@ -26,6 +26,17 @@ function rowLabel(row: Record<string, unknown>): string {
   return "Token";
 }
 
+/** Optional `feeManager` on a manual row — same as `prepareDeposit` arg0 on BaseScan. */
+function rowFeeManager(row: Record<string, unknown>): Address | null {
+  const v = row.feeManager ?? row.fee_manager;
+  if (typeof v !== "string" || !v.startsWith("0x")) return null;
+  try {
+    return getAddress(v.trim());
+  } catch {
+    return null;
+  }
+}
+
 type NextAction =
   | { kind: "loading" }
   | { kind: "blocked"; reason: string }
@@ -227,10 +238,10 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     setToken0(t0);
     setToken1(t1);
 
-    let fm: Address;
-    let txTo: Address;
-    let txData: Hex;
-    let chainId: number;
+    const fmFromRow = rowFeeManager(row);
+    let fm: Address | undefined;
+    let payload: { to: Address; data: Hex; chainId: number } | null = null;
+
     try {
       const res = await fetch("/api/bankr-build-transfer", {
         method: "POST",
@@ -247,22 +258,34 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
         data?: { to?: string; data?: string; chainId?: number };
         body?: unknown;
       };
-      if (!json.ok || !json.data || typeof json.data.to !== "string" || typeof json.data.data !== "string") {
+      const d = json.data;
+      const bankrOk =
+        Boolean(json.ok) &&
+        d &&
+        typeof d.to === "string" &&
+        typeof d.data === "string" &&
+        isHex(d.data);
+      if (bankrOk && d) {
+        fm = getAddress(d.to);
+        payload = {
+          to: fm,
+          data: d.data as Hex,
+          chainId: typeof d.chainId === "number" ? d.chainId : MVP_CHAIN_ID,
+        };
+      } else {
         let detail = json.error || `HTTP ${res.status}`;
         if (json.body && typeof json.body === "object" && "error" in json.body) {
           detail = String((json.body as { error?: string }).error);
         }
-        setNext({ kind: "blocked", reason: `Could not build beneficiary transfer: ${detail}` });
-        return;
+        const beneficiaryMismatch =
+          typeof detail === "string" && /not a beneficiary|beneficiary/i.test(detail) && fmFromRow !== null;
+        if (!beneficiaryMismatch) {
+          setNext({ kind: "blocked", reason: `Could not build beneficiary transfer: ${detail}` });
+          return;
+        }
+        fm = fmFromRow;
+        payload = null;
       }
-      if (!isHex(json.data.data)) {
-        setNext({ kind: "blocked", reason: "Bankr returned invalid calldata." });
-        return;
-      }
-      fm = getAddress(json.data.to);
-      txTo = getAddress(json.data.to);
-      txData = json.data.data;
-      chainId = typeof json.data.chainId === "number" ? json.data.chainId : MVP_CHAIN_ID;
     } catch (e) {
       setNext({
         kind: "blocked",
@@ -274,8 +297,16 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
       return;
     }
 
+    if (!fm) {
+      setNext({
+        kind: "blocked",
+        reason:
+          "Could not determine the fee manager contract. Add the optional “Fee manager” field from your Prepare deposit transaction (first address in the decoded input) and open Get receipt again.",
+      });
+      return;
+    }
+
     setFeeManager(fm);
-    const payload = { to: txTo, data: txData, chainId };
     setTransferPayload(payload);
 
     try {

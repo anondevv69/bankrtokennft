@@ -466,6 +466,7 @@ export default function App() {
   const [escrowWizardRow, setEscrowWizardRow] = useState<Record<string, unknown> | null>(null);
   const [receiptManualPool, setReceiptManualPool] = useState("");
   const [receiptManualToken, setReceiptManualToken] = useState("");
+  const [receiptManualFeeManager, setReceiptManualFeeManager] = useState("");
   const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
@@ -1018,7 +1019,7 @@ export default function App() {
                       )}
                       <div className="bankr-panel__manual">
                         <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.35rem" }}>
-                          Bankr did not return your launch in the list above, so this is a <strong>backup path</strong> — normally you would not need it. Two clipboard pastes, then you are back in the same <strong>Get receipt</strong> popup as before.
+                          Bankr did not return your launch in the list above, so this is a <strong>backup path</strong> — normally you would not need it. Paste pool id + token; add fee manager if you already completed the fee transfer step.
                         </p>
                         {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
                         <details className="bfrr-primer" style={{ marginBottom: "0.65rem" }}>
@@ -1028,6 +1029,9 @@ export default function App() {
                               <li style={{ marginBottom: "0.35rem" }}>
                                 <strong>Pool ID</strong> — On{" "}
                                 <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s transaction <strong>Prepare deposit</strong> (method to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>). Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy the argument named like <span className="mono">poolId</span> — it must be <strong>0x</strong> plus <strong>64</strong> hex characters (66 characters total). If you copy the whole input string or a shorter hex, this box will error until it is exactly that length.
+                              </li>
+                              <li style={{ marginBottom: "0.35rem" }}>
+                                <strong>Fee manager (optional)</strong> — Same decoded tx: the first address argument (<span className="mono">feeManager</span>). Paste it if you <strong>already moved fees to escrow</strong> (Bankr then says you are “not a beneficiary”); the app uses it to offer <strong>Finalize / mint receipt</strong> without calling Bankr again.
                               </li>
                               <li>
                                 <strong>Launched token address</strong> — The ERC-20 you launched (the coin contract traders swap), <strong>not</strong> the BFRR receipt contract and <strong>not</strong> the marketplace. Same launch page on Bankr often shows “contract” or “token address”.
@@ -1060,6 +1064,21 @@ export default function App() {
                             }}
                             spellCheck={false}
                           />
+                        </div>
+                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>
+                          3. Fee manager (optional — from same Prepare tx, first address)
+                        </label>
+                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
+                          <input
+                            className="mono"
+                            placeholder="0x… feeManager — paste if “not a beneficiary” after you already transferred fees to escrow"
+                            value={receiptManualFeeManager}
+                            onChange={(e) => {
+                              setReceiptManualFeeManager(e.target.value);
+                              setReceiptManualErr(null);
+                            }}
+                            spellCheck={false}
+                          />
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
@@ -1067,6 +1086,7 @@ export default function App() {
                             onClick={() => {
                               const pid = normalizePoolId(receiptManualPool.trim());
                               const tok = tryParseAddress(receiptManualToken.trim());
+                              const fmOpt = tryParseAddress(receiptManualFeeManager.trim());
                               if (!pid) {
                                 setReceiptManualErr(explainPoolIdPasteError(receiptManualPool));
                                 return;
@@ -1076,11 +1096,13 @@ export default function App() {
                                 return;
                               }
                               setReceiptManualErr(null);
-                              setEscrowWizardRow({
+                              const row: Record<string, unknown> = {
                                 poolId: pid,
                                 tokenAddress: tok,
                                 tokenSymbol: "Token",
-                              });
+                              };
+                              if (fmOpt) row.feeManager = fmOpt;
+                              setEscrowWizardRow(row);
                             }}
                           >
                             Open Get receipt
