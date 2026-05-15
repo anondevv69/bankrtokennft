@@ -280,6 +280,46 @@ a:hover { text-decoration: underline; }
   letter-spacing: inherit;
 }
 
+.profile-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.profile-hero__main h1 {
+  margin-top: 0;
+}
+.profile-hero__refresh {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+
+.profile-advanced {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  padding: 0.15rem 0.65rem 0.65rem;
+  background: var(--surface);
+}
+.profile-advanced--receipt {
+  margin-bottom: 0.75rem;
+}
+.profile-advanced summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted-2);
+  padding: 0.4rem 0;
+  list-style: none;
+}
+.profile-advanced summary::-webkit-details-marker {
+  display: none;
+}
+.profile-advanced__body {
+  padding-top: 0.15rem;
+}
+
 .profile-tab-hint {
   text-align: center;
   margin: 1.5rem 0 2rem;
@@ -610,6 +650,13 @@ button { cursor: pointer; font-family: var(--font); }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.bfrr-card__tickers {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1.25;
 }
 
 .bfrr-card__desc {
@@ -1178,8 +1225,22 @@ input::placeholder { color: var(--muted); }
 
 .bankr-panel__row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.45rem;
+}
+
+.bankr-panel__col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.bankr-panel__sub {
+  font-size: 0.7rem;
+  color: var(--muted);
+  line-height: 1.2;
 }
 
 .bankr-panel__name {

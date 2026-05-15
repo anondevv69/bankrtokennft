@@ -41,3 +41,37 @@ export function rowPoolIdHex(row: Record<string, unknown>): Hex | null {
   }
   return null;
 }
+
+function shortAddr(addr: string) {
+  return addr.slice(0, 6) + "…" + addr.slice(-4);
+}
+
+/** Primary label for a fee / launch row in the UI (symbol + contract, never bare numeric ids alone). */
+export function launchRowLabel(row: Record<string, unknown>): string {
+  const ta = rowLaunchedToken(row);
+  const shortTa = ta ? shortAddr(ta) : null;
+  const pid = rowPoolIdHex(row);
+  const shortPool = pid ? `${pid.slice(0, 8)}…${pid.slice(-6)}` : null;
+  for (const k of ["tokenSymbol", "symbol", "name", "title", "ticker", "slug"]) {
+    const v = row[k];
+    if (typeof v === "string" && v.trim()) {
+      const s = v.trim();
+      if (shortTa) {
+        const n = s.toLowerCase();
+        const a = shortTa.toLowerCase();
+        if (!n.startsWith("0x") && !n.includes(a.slice(0, 8))) return `${s} · ${shortTa}`;
+      }
+      return s;
+    }
+  }
+  if (shortTa) return shortTa;
+  if (shortPool) return `Pool ${shortPool}`;
+  for (const k of ["id", "launchId"]) {
+    const v = row[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  const rawTa = row.tokenAddress;
+  if (typeof rawTa === "string" && rawTa.length > 10) return `${rawTa.slice(0, 6)}…${rawTa.slice(-4)}`;
+  return "Token";
+}

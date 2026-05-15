@@ -26,7 +26,7 @@ import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId, rowLaunchedToken, rowPoolIdHex } from "./lib/escrowArgs";
+import { normalizePoolId, rowPoolIdHex, launchRowLabel } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -131,17 +131,6 @@ function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
   return walk(data)?.filter((x) => x && typeof x === "object") ?? [];
 }
 
-function launchRowLabel(row: Record<string, unknown>): string {
-  for (const k of ["tokenSymbol", "symbol", "name", "title", "ticker", "slug", "id", "launchId"]) {
-    const v = row[k];
-    if (typeof v === "string" && v.trim()) return v;
-    if (typeof v === "number") return String(v);
-  }
-  const ta = row.tokenAddress;
-  if (typeof ta === "string" && ta.length > 10) return `${ta.slice(0, 6)}…${ta.slice(-4)}`;
-  return "Token";
-}
-
 function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   const url = row.url ?? row.href ?? row.link;
   if (typeof url === "string" && url.startsWith("http")) return url;
@@ -158,16 +147,34 @@ function parseDataUriJsonMetadata(tokenUri: unknown): {
   name?: string;
   description?: string;
   image?: string | null;
+  pairTrait?: string;
 } {
   if (!tokenUri || typeof tokenUri !== "string") return {};
   if (!tokenUri.startsWith("data:application/json;base64,")) return {};
   try {
     const b64 = tokenUri.replace("data:application/json;base64,", "");
-    const json = JSON.parse(atob(b64)) as { name?: string; description?: string; image?: string };
+    const json = JSON.parse(atob(b64)) as {
+      name?: string;
+      description?: string;
+      image?: string;
+      attributes?: unknown;
+    };
+    let pairTrait: string | undefined;
+    if (Array.isArray(json.attributes)) {
+      for (const a of json.attributes) {
+        if (!a || typeof a !== "object") continue;
+        const o = a as Record<string, unknown>;
+        if (o.trait_type === "Pair" && typeof o.value === "string" && o.value.trim()) {
+          pairTrait = o.value.trim();
+          break;
+        }
+      }
+    }
     return {
       name: typeof json.name === "string" ? json.name : undefined,
       description: typeof json.description === "string" ? json.description : undefined,
       image: typeof json.image === "string" ? json.image : null,
+      pairTrait,
     };
   } catch {
     return {};
@@ -192,6 +199,10 @@ const erc721Abi = [
 const escrowAbi = [
   { type: "function", name: "redeemRights", stateMutability: "nonpayable",
     inputs: [{ name: "tokenId", type: "uint256" }], outputs: [] },
+] as const;
+
+const erc20SymbolAbi = [
+  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
 ] as const;
 
 const transferEvent = parseAbiItem(
@@ -282,6 +293,43 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
   const meta = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
   const imgSrc = meta.image ?? null;
 
+  const t0addr = useMemo(() => {
+    if (!position || typeof position.token0 !== "string") return undefined;
+    if (!isAddress(position.token0, { strict: false })) return undefined;
+    try {
+      return getAddress(position.token0);
+    } catch {
+      return undefined;
+    }
+  }, [position]);
+  const t1addr = useMemo(() => {
+    if (!position || typeof position.token1 !== "string") return undefined;
+    if (!isAddress(position.token1, { strict: false })) return undefined;
+    try {
+      return getAddress(position.token1);
+    } catch {
+      return undefined;
+    }
+  }, [position]);
+
+  const { data: sym0 } = useReadContract({
+    address: t0addr,
+    abi: erc20SymbolAbi,
+    functionName: "symbol",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: Boolean(t0addr) && !wrongNetwork },
+  });
+  const { data: sym1 } = useReadContract({
+    address: t1addr,
+    abi: erc20SymbolAbi,
+    functionName: "symbol",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: Boolean(t1addr) && !wrongNetwork },
+  });
+
+  const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
+  const symbol1 = typeof sym1 === "string" && sym1.trim() ? sym1.trim() : null;
+
   const title =
     (position && typeof position.factoryName === "string" && position.factoryName.trim())
       ? position.factoryName.trim()
@@ -291,6 +339,11 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
     position && typeof position.token0 === "string" && typeof position.token1 === "string"
       ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
       : null;
+
+  const tickerLine =
+    symbol0 && symbol1
+      ? `${symbol0} / ${symbol1}`
+      : (meta.pairTrait?.trim() || pairLabel);
 
   const basescanNft = `https://basescan.org/nft/${collection}/${id}`;
 
@@ -307,11 +360,13 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
       )}
       <div className="bfrr-card__footer">
         <div className="bfrr-card__title" title={title}>{title}</div>
+        {tickerLine && (
+          <div className={`bfrr-card__tickers${symbol0 && symbol1 ? "" : " mono"}`} title={tickerLine}>
+            {tickerLine}
+          </div>
+        )}
         {meta.description && (
           <div className="bfrr-card__desc" title={meta.description}>{meta.description}</div>
-        )}
-        {pairLabel && (
-          <div className="bfrr-card__pair mono" title={`Pool tokens: ${pairLabel}`}>Pair {pairLabel}</div>
         )}
         <div className="bfrr-card__id-row">
           <span className="bfrr-card__id mono" title={`Token ID ${id}`}>
@@ -611,6 +666,7 @@ export default function App() {
   const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
+  const walletScanKeyRef = useRef("");
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
@@ -636,9 +692,15 @@ export default function App() {
   // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
   useEffect(() => {
     if (!isConnected || !address || !collection || !publicClient || wrongNetwork) return;
-    setScannedIds([]);
-    setManualIds([]);
-    setSelectedId(null);
+    const key = `${getAddress(address)}|${getAddress(collection)}`;
+    const identityChanged = walletScanKeyRef.current !== key;
+    if (identityChanged) {
+      walletScanKeyRef.current = key;
+      setManualIds([]);
+      setSelectedId(null);
+      setScannedIds([]);
+    }
+
     setScanErr(null);
     setScanning(true);
     (async () => {
@@ -804,36 +866,27 @@ export default function App() {
         positionQueries.length === 0 ||
         positionQueries.every((q) => q.status === "success" || q.status === "error"));
 
-  const { heldPoolIds, heldPairTokens } = useMemo(() => {
+  const { heldPoolIds } = useMemo(() => {
     const pools = new Set<string>();
-    const tokens = new Set<string>();
     const zeroPool = `0x${"0".repeat(64)}`;
     for (const q of positionQueries) {
       const pos = q.data;
       if (!pos) continue;
       const pid = String(pos.poolId).toLowerCase();
       if (pid && pid !== zeroPool) pools.add(pid);
-      try {
-        tokens.add(getAddress(pos.token0).toLowerCase());
-        tokens.add(getAddress(pos.token1).toLowerCase());
-      } catch {
-        /* ignore malformed */
-      }
     }
-    return { heldPoolIds: pools, heldPairTokens: tokens };
+    return { heldPoolIds: pools };
   }, [positionQueries]);
 
   const bankrRowsNotYetReceived = useMemo(() => {
     if (idsForWatch.length > 0 && !bfrrDedupeReady) return [];
-    if (heldPoolIds.size === 0 && heldPairTokens.size === 0) return bankrRows;
+    if (heldPoolIds.size === 0) return bankrRows;
     return bankrRows.filter((row) => {
       const pid = rowPoolIdHex(row);
       if (pid && heldPoolIds.has(pid.toLowerCase())) return false;
-      const tok = rowLaunchedToken(row);
-      if (tok && heldPairTokens.has(tok.toLowerCase())) return false;
       return true;
     });
-  }, [bankrRows, heldPoolIds, heldPairTokens, idsForWatch.length, bfrrDedupeReady]);
+  }, [bankrRows, heldPoolIds, idsForWatch.length, bfrrDedupeReady]);
 
   useEffect(() => {
     if (!ownershipReady || !selectedId) return;
@@ -874,6 +927,15 @@ export default function App() {
       setBankrLoading(false);
     }
   }, [address]);
+
+  const refreshProfile = useCallback(() => {
+    void loadBankrLaunches();
+    void refetchListings();
+    void qc.invalidateQueries();
+    setScanEpoch((e) => e + 1);
+  }, [loadBankrLaunches, refetchListings, qc]);
+
+  const refreshBusy = bankrLoading || scanning;
 
   useEffect(() => {
     if (!address) {
@@ -1023,9 +1085,25 @@ export default function App() {
 
       {mainTab === "profile" && (
         <>
-          <div className="hero hero--compact">
-            <h1>My profile</h1>
-            <p className="muted">Your wallet and items on Base.</p>
+          <div className="hero hero--compact profile-hero">
+            <div className="profile-hero__main">
+              <h1>My profile</h1>
+              <p className="muted">Your wallet and items on Base.</p>
+            </div>
+            {isConnected && address && !wrongNetwork && collection && marketplace && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm profile-hero__refresh"
+                disabled={refreshBusy}
+                onClick={() => void refreshProfile()}
+              >
+                {refreshBusy ? (
+                  <><span className="spinner" />Refreshing…</>
+                ) : (
+                  "Refresh"
+                )}
+              </button>
+            )}
           </div>
 
           {!isConnected && (
@@ -1105,8 +1183,13 @@ export default function App() {
                         </p>
                       </InfoTip>
                     </h2>
-                    <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-                      {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={refreshBusy}
+                      onClick={() => void refreshProfile()}
+                    >
+                      {refreshBusy ? <><span className="spinner" />Refreshing…</> : "Refresh"}
                     </button>
                   </div>
                   <p className="muted one-liner">Tokens we found for your wallet. Use <strong>List</strong> to continue.</p>
@@ -1120,6 +1203,7 @@ export default function App() {
                       {bankrRowsNotYetReceived.map((row, i) => {
                         const ta = row.tokenAddress;
                         const pid = row.poolId;
+                        const poolHex = rowPoolIdHex(row);
                         const key =
                           typeof ta === "string" && ta.startsWith("0x")
                             ? ta.toLowerCase()
@@ -1129,7 +1213,14 @@ export default function App() {
                         return (
                           <li key={key}>
                             <div className="bankr-panel__row">
-                              <span className="bankr-panel__name">{launchRowLabel(row)}</span>
+                              <div className="bankr-panel__col">
+                                <span className="bankr-panel__name">{launchRowLabel(row)}</span>
+                                {poolHex && (
+                                  <div className="bankr-panel__sub mono" title={poolHex}>
+                                    Pool {poolHex.slice(0, 10)}…{poolHex.slice(-8)}
+                                  </div>
+                                )}
+                              </div>
                               <a
                                 className="bankr-panel__row-ext"
                                 href={launchRowHref(row, address ?? "")}
@@ -1159,32 +1250,34 @@ export default function App() {
                           <p className="err one-liner">{bankrErr}</p>
                         ) : bankrRows.length === 0 ? (
                           <p className="muted one-liner">
-                            Nothing loaded — try <strong>Refresh</strong> or manual entry below.
+                            Nothing loaded — try <strong>Refresh</strong>, or open <strong>advanced</strong> below.
                           </p>
                         ) : !bfrrDedupeReady ? null : (
                           <p className="muted one-liner">
                             Everything here already has a matching receipt below. <strong>Refresh</strong> if that seems wrong.
                           </p>
                         )}
-                        <div className="bankr-panel__manual">
-                          <p className="muted one-liner" style={{ marginTop: "0.85rem", marginBottom: "0.35rem" }}>
-                            Manual entry if nothing appears above.
-                            <InfoTip label="Where to find pool id, token, and fee manager">
-                              <ol className="info-tip__ol">
-                                <li>
-                                  <strong>Pool ID</strong> — On{" "}
-                                  <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s <strong>Prepare deposit</strong> transaction to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>. Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy <span className="mono">poolId</span>: exactly <strong>0x</strong> + <strong>64</strong> hex characters.
-                                </li>
-                                <li>
-                                  <strong>Fee manager (optional)</strong> — From the same decoded call: the first address argument (<span className="mono">feeManager</span>). Paste it if you already transferred fees to escrow and the flow says you are not the current beneficiary; the app can then offer finalize / mint without another lookup.
-                                </li>
-                                <li>
-                                  <strong>Launched token</strong> — The ERC-20 traders swap (the coin contract), not the receipt NFT contract and not the marketplace.
-                                </li>
-                              </ol>
-                            </InfoTip>
-                          </p>
-                          {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
+                        <details className="profile-advanced">
+                          <summary>Can’t find your token? (advanced)</summary>
+                          <div className="profile-advanced__body">
+                            <p className="muted one-liner" style={{ marginBottom: "0.5rem" }}>
+                              Enter pool id and launch token if the list above is empty or wrong.
+                              <InfoTip label="Where to find pool id, token, and fee manager">
+                                <ol className="info-tip__ol">
+                                  <li>
+                                    <strong>Pool ID</strong> — On{" "}
+                                    <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s <strong>Prepare deposit</strong> transaction to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>. Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy <span className="mono">poolId</span>: exactly <strong>0x</strong> + <strong>64</strong> hex characters.
+                                  </li>
+                                  <li>
+                                    <strong>Fee manager (optional)</strong> — From the same decoded call: the first address argument (<span className="mono">feeManager</span>). Paste it if you already transferred fees to escrow and the flow says you are not the current beneficiary; the app can then offer finalize / mint without another lookup.
+                                  </li>
+                                  <li>
+                                    <strong>Launched token</strong> — The ERC-20 traders swap (the coin contract), not the receipt NFT contract and not the marketplace.
+                                  </li>
+                                </ol>
+                              </InfoTip>
+                            </p>
+                            {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
                           <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.2rem" }}>1. Pool id (bytes32)</label>
                           <div className="profile-paste-row" style={{ marginTop: 0 }}>
                             <input
@@ -1254,7 +1347,8 @@ export default function App() {
                               Open listing setup
                             </button>
                           </div>
-                        </div>
+                          </div>
+                        </details>
                       </>
                     )
                   )}
@@ -1277,15 +1371,19 @@ export default function App() {
                       {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrIds.length} not listed`}
                     </span>
                   </div>
-                  <p className="muted one-liner">Unlisted receipts we detected. Add an ID manually if needed.</p>
+                  <p className="muted one-liner">Receipts in your wallet that are not listed here yet.</p>
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
                   {!scanning && unlistedBfrrIds.length === 0 && ownershipReady && walletOwnedReceiptIds.length === 0 && idsForWatch.length === 0 && (
-                    <>
-                      <p className="empty">No receipt found in our scan.</p>
-                      <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
-                        Paste the numeric token ID from{" "}
+                    <p className="empty">No receipt found in our scan.</p>
+                  )}
+
+                  <details className="profile-advanced profile-advanced--receipt">
+                    <summary>Receipt not showing? Paste token ID (advanced)</summary>
+                    <div className="profile-advanced__body">
+                      <p className="muted one-liner" style={{ marginBottom: "0.5rem" }}>
+                        If our scan missed an NFT you already minted, add its numeric ID from{" "}
                         <a
                           href={
                             collection
@@ -1297,44 +1395,43 @@ export default function App() {
                         >
                           BaseScan
                         </a>
-                        {" "}if you already minted one (same wallet and Base).
+                        .
                         <InfoTip label="Finding the token ID on BaseScan">
                           <p>
-                            On BaseScan open the receipt contract’s page, go to the <strong>ERC-721</strong> tab or your
-                            wallet’s token view, and copy the <strong>Token ID</strong> number (digits only).
+                            Open the receipt contract on BaseScan, use the <strong>ERC-721</strong> tab or your wallet’s
+                            token view, and copy the <strong>Token ID</strong> (digits only).
                           </p>
                         </InfoTip>
                       </p>
-                    </>
-                  )}
-
-                  <div className="profile-paste-row">
-                    <input
-                      className="mono"
-                      placeholder="Paste token ID"
-                      value={pasteId}
-                      onChange={(e) => setPasteId(e.target.value)}
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        const t = pasteId.trim();
-                        if (!t) return;
-                        try {
-                          const id = BigInt(t).toString();
-                          setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-                          setSelectedId(id);
-                          setPasteId("");
-                        } catch {
-                          /* invalid */
-                        }
-                      }}
-                    >
-                      Add
-                    </button>
-                  </div>
+                      <div className="profile-paste-row">
+                        <input
+                          className="mono"
+                          placeholder="Paste token ID"
+                          value={pasteId}
+                          onChange={(e) => setPasteId(e.target.value)}
+                          spellCheck={false}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => {
+                            const t = pasteId.trim();
+                            if (!t) return;
+                            try {
+                              const id = BigInt(t).toString();
+                              setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+                              setSelectedId(id);
+                              setPasteId("");
+                            } catch {
+                              /* invalid */
+                            }
+                          }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </details>
 
                   <div className="profile-receipt-list">
                     {unlistedBfrrIds.map((id) => (

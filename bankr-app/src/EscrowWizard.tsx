@@ -7,7 +7,7 @@ import { getWalletClient } from "wagmi/actions";
 import { MVP_CHAIN, MVP_CHAIN_ID } from "./chain";
 import { bankrEscrowAbi } from "./lib/bankrEscrowAbi";
 import { bankrFeesMinimalAbi } from "./lib/bankrFeesMinimalAbi";
-import { inferToken0Token1, normalizePoolId, rowLaunchedToken } from "./lib/escrowArgs";
+import { inferToken0Token1, normalizePoolId, rowLaunchedToken, launchRowLabel } from "./lib/escrowArgs";
 
 export type EscrowWizardProps = {
   row: Record<string, unknown>;
@@ -18,15 +18,6 @@ export type EscrowWizardProps = {
   onDone: () => void;
 };
 
-function rowLabel(row: Record<string, unknown>): string {
-  for (const k of ["tokenSymbol", "symbol", "name"]) {
-    const v = row[k];
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return "Token";
-}
-
-/** Optional `feeManager` on a manual row — same as `prepareDeposit` arg0 on BaseScan. */
 function rowFeeManager(row: Record<string, unknown>): Address | null {
   const v = row.feeManager ?? row.fee_manager;
   if (typeof v !== "string" || !v.startsWith("0x")) return null;
@@ -467,7 +458,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
   const pending = writePending || sendPending || switchPending || busy;
   /** Prefer wagmi chain; UI hint only — `ensureBase` re-checks the signer before each tx. */
   const wrongChain = chainId !== MVP_CHAIN_ID;
-  const label = rowLabel(row);
+  const label = launchRowLabel(row);
 
   return (
     <div className="settings-overlay" onClick={onClose}>
