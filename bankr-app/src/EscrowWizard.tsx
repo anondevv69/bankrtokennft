@@ -302,7 +302,15 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
 
     try {
       const s = await readEscrowState(publicClient, escrowAddress, fm, pid, userAddress);
-      setNext(deriveNext(s, userAddress, payload));
+      let n = deriveNext(s, userAddress, payload);
+      if (n.kind === "blocked" && !s.allowed) {
+        n = {
+          kind: "blocked",
+          reason:
+            `Escrow ${escrowAddress} has fee manager ${fm} disabled (read allowedFeeManager on BaseScan). Either set VITE_ESCROW_ADDRESS to an escrow that already allowlists this manager and rebuild, or ask the owner of this escrow to call setFeeManagerAllowed(${fm}, true).`,
+        };
+      }
+      setNext(n);
     } catch (e) {
       setNext({
         kind: "blocked",

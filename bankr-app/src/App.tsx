@@ -95,6 +95,28 @@ function envAddr(name: string): string {
   return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
 }
 
+/** Comma-separated `0x…` addresses from env (e.g. legacy BFRR collections to scan alongside the default). */
+function envAddrCsvList(name: string): Address[] {
+  const raw = (import.meta as ImportMeta).env[name];
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  const out: Address[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(",")) {
+    const a = tryParseAddress(part);
+    if (!a) continue;
+    const k = a.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(a);
+  }
+  return out;
+}
+
+/** Stable row id: `0x…collection|tokenId` (collection lowercased for parsing). */
+function receiptRowKey(collection: Address, tokenId: string): string {
+  return `${getAddress(collection).toLowerCase()}|${tokenId}`;
+}
+
 const ESCROW_DEFAULT: Address = "0xFb28D9C636514f8a9D129873750F9b886707d95F";
 
 function escrowAddressFromEnv(): Address {
@@ -644,9 +666,9 @@ function useActiveListingsSearchEnrichment(
 
 // ── BfrrCard ─────────────────────────────────────────────────────────────────
 
-function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, staticDisplay }: {
+function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay }: {
   tokenId: string; collection: Address; selected: boolean;
-  wrongNetwork: boolean; onClick?: () => void;
+  onClick?: () => void;
   /** When true, render a non-interactive preview (e.g. next to profile actions). */
   staticDisplay?: boolean;
 }) {
@@ -1143,10 +1165,10 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
 // ── SellPanel ────────────────────────────────────────────────────────────────
 
 function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
-  wrongNetwork, isConnected, onDone, onListFlowStart, onListFlowEnd }: {
+  isConnected, onDone, onListFlowStart, onListFlowEnd }: {
   tokenIdStr: string; collection: Address; marketplace: Address;
   address: Address | undefined; txDisabled: boolean;
-  wrongNetwork: boolean; isConnected: boolean;
+  isConnected: boolean;
   onDone: () => void | Promise<void>;
   onListFlowStart?: () => void;
   onListFlowEnd?: () => void;
@@ -1158,22 +1180,31 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   const publicClient = usePublicClient();
 
   const tokenId = useMemo(() => { try { return BigInt(tokenIdStr); } catch { return null; } }, [tokenIdStr]);
-  const enabled = !wrongNetwork && !txDisabled && tokenId !== null;
+  /** On-chain reads use Base (`MVP_CHAIN_ID`) even when the wallet is connected to another chain. */
+  const readOk = tokenId !== null && Boolean(collection);
+  const writeOk = readOk && !txDisabled;
 
   const { data: approvedSpender } = useReadContract({
     address: collection, abi: erc721Abi, functionName: "getApproved",
     args: tokenId !== null ? [tokenId] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: enabled && isConnected },
+    query: { enabled: readOk && isConnected },
   });
   const { data: approvedAll } = useReadContract({
     address: collection, abi: erc721Abi, functionName: "isApprovedForAll",
     args: address ? [address, marketplace] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: enabled && Boolean(address) },
+    query: { enabled: readOk && Boolean(address) },
   });
   const { data: bfrrOwner } = useReadContract({
     address: collection, abi: erc721Abi, functionName: "ownerOf",
     args: tokenId !== null ? [tokenId] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: enabled },
+    query: { enabled: readOk },
+  });
+  const { data: receiptEscrow } = useReadContract({
+    address: collection,
+    abi: bankrFeeRightsReceiptAbi,
+    functionName: "escrow",
+    chainId: MVP_CHAIN_ID,
+    query: { enabled: readOk },
   });
 
   const canPull = Boolean(
@@ -1198,6 +1229,17 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     ) : (
       "List"
     );
+
+  const redeemEscrowAddr = useMemo((): Address => {
+    if (typeof receiptEscrow === "string" && isAddress(receiptEscrow, { strict: false })) {
+      try {
+        return getAddress(receiptEscrow as Address);
+      } catch {
+        /* fall through */
+      }
+    }
+    return ESCROW_ADDRESS;
+  }, [receiptEscrow]);
 
   const onList = () => run(async () => {
     if (!priceOk || tokenId === null || txDisabled || !publicClient) return;
@@ -1250,7 +1292,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 
       <div className="sell-actions sell-actions--single">
         <button type="button" className="btn btn-primary btn-full"
-          disabled={txDisabled || !priceOk || tokenId === null || listStep !== null || isPending}
+          disabled={!writeOk || !priceOk || tokenId === null || listStep !== null || isPending}
           onClick={onList}>
           {listLabel}
         </button>
@@ -1273,13 +1315,13 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
         </div>
         <div className="redeem-row__btn-wrap">
           <button type="button" className="btn btn-ghost btn-sm"
-            disabled={txDisabled || !isBfrrOwner || tokenId === null || listBusy}
+            disabled={!writeOk || !isBfrrOwner || tokenId === null || listBusy}
             title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
             onClick={() => run(async () => {
               setRedeemPhase(true);
               try {
                 await writeContractAsync({
-                  address: ESCROW_ADDRESS, abi: escrowAbi, functionName: "redeemRights",
+                  address: redeemEscrowAddr, abi: escrowAbi, functionName: "redeemRights",
                   args: [tokenId!], chainId: MVP_CHAIN_ID,
                 });
               } finally {
@@ -1313,10 +1355,11 @@ export default function App() {
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
   const publicClient = usePublicClient();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedReceiptKey, setSelectedReceiptKey] = useState<string | null>(null);
   const [scannedIds, setScannedIds] = useState<string[]>([]);
   const [manualIds, setManualIds] = useState<string[]>([]);
   const [pasteId, setPasteId] = useState("");
+  const [pasteIdErr, setPasteIdErr] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanErr, setScanErr] = useState<string | null>(null);
   const [bankrLoading, setBankrLoading] = useState(false);
@@ -1331,13 +1374,34 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
   const [homeListingSearch, setHomeListingSearch] = useState("");
   const walletScanKeyRef = useRef("");
-  /** Profile row: which BFRR tokenId is currently executing `redeemRights` (for button + row hint). */
-  const [redeemingForId, setRedeemingForId] = useState<string | null>(null);
-  /** Profile: approve+list in flight for this receipt (row stays visible until tx confirms + listings refetch). */
-  const [listingBusyTokenId, setListingBusyTokenId] = useState<string | null>(null);
+  /** Profile row: `receiptRowKey(collection, tokenId)` while `redeemRights` is in flight. */
+  const [redeemingForReceiptKey, setRedeemingForReceiptKey] = useState<string | null>(null);
+  /** Profile: approve+list in flight for this receipt row key. */
+  const [listingBusyReceiptKey, setListingBusyReceiptKey] = useState<string | null>(null);
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
+  const receiptCollectionAliases = useMemo(() => envAddrCsvList("VITE_RECEIPT_COLLECTION_ALIASES"), []);
+
+  const receiptScanTargets = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Address[] = [];
+    const push = (a: Address | undefined) => {
+      if (!a) return;
+      const k = a.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(a);
+    };
+    push(collection ?? undefined);
+    for (const a of receiptCollectionAliases) push(a);
+    return out;
+  }, [collection, receiptCollectionAliases]);
+
+  const receiptScanTargetsKey = useMemo(
+    () => [...receiptScanTargets].map((a) => a.toLowerCase()).sort().join(","),
+    [receiptScanTargets],
+  );
   const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
   const txDisabled  = !isConnected || writePending || wrongNetwork;
 
@@ -1359,13 +1423,13 @@ export default function App() {
 
   // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
   useEffect(() => {
-    if (!isConnected || !address || !collection || !publicClient || wrongNetwork) return;
-    const key = `${getAddress(address)}|${getAddress(collection)}`;
+    if (!isConnected || !address || receiptScanTargets.length === 0 || !publicClient) return;
+    const key = `${getAddress(address)}|${receiptScanTargetsKey}`;
     const identityChanged = walletScanKeyRef.current !== key;
     if (identityChanged) {
       walletScanKeyRef.current = key;
       setManualIds([]);
-      setSelectedId(null);
+      setSelectedReceiptKey(null);
       setScannedIds([]);
     }
 
@@ -1375,14 +1439,21 @@ export default function App() {
       try {
         const latest = await publicClient.getBlockNumber();
         const from = latest > scanBlockSpan ? latest - scanBlockSpan : 0n;
-        const logs = await getTransferLogsChunked(publicClient, {
-          collection, recipient: getAddress(address), fromBlock: from, toBlock: latest,
-        });
-        const ids = [...new Set(
-          logs.map(l => l.args.tokenId).filter((t): t is bigint => typeof t === "bigint")
-            .map(x => x.toString())
-        )];
-        setScannedIds(ids);
+        const recipient = getAddress(address);
+        const idSet = new Set<string>();
+        for (const col of receiptScanTargets) {
+          const logs = await getTransferLogsChunked(publicClient, {
+            collection: col,
+            recipient,
+            fromBlock: from,
+            toBlock: latest,
+          });
+          for (const l of logs) {
+            const t = l.args.tokenId;
+            if (typeof t === "bigint") idSet.add(t.toString());
+          }
+        }
+        setScannedIds([...idSet].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0)));
       } catch (e) {
         setScanErr(
           e instanceof Error ? e.message : "Could not scan transfers — check RPC or try pasting your token ID below.",
@@ -1390,7 +1461,7 @@ export default function App() {
       } finally { setScanning(false); }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isConnected, address, collection?.toLowerCase(), wrongNetwork, scanEpoch]);
+  }, [isConnected, address, receiptScanTargetsKey, scanEpoch]);
 
   // Listings
   const { data: activeListings = [], isLoading: listingsLoading, isFetching: listingsFetching, refetch: refetchListings } = useQuery({
@@ -1427,34 +1498,43 @@ export default function App() {
     );
   }, [activeListings, address]);
 
-  const myListedTokenIds = useMemo(() => {
+  const myListedKeys = useMemo(() => {
     const set = new Set<string>();
-    if (!collection) return set;
-    const col = getAddress(collection);
     for (const li of myListings) {
-      if (getAddress(li.collection) === col) set.add(li.tokenId.toString());
+      if (!isAddress(li.collection, { strict: false })) continue;
+      try {
+        set.add(receiptRowKey(getAddress(li.collection), li.tokenId.toString()));
+      } catch {
+        /* skip */
+      }
     }
     return set;
-  }, [myListings, collection]);
+  }, [myListings]);
 
   const ownershipQueries = useQueries({
     queries: (() => {
-      if (!publicClient || !collection || !address) return [];
+      if (!publicClient || !address || receiptScanTargets.length === 0) return [];
       const me = getAddress(address);
       return idsForWatch.map((id) => ({
-        queryKey: ["bfrr-owner", collection, me, id],
-        queryFn: async () => {
-          if (!publicClient || !collection) return null;
-          try {
-            return await publicClient.readContract({
-              address: collection,
-              abi: erc721Abi,
-              functionName: "ownerOf",
-              args: [BigInt(id)],
-            }) as Address;
-          } catch {
-            return null;
+        queryKey: ["bfrr-owner-resolve", receiptScanTargetsKey, me, id] as const,
+        queryFn: async (): Promise<{ collection: Address } | null> => {
+          if (!publicClient) return null;
+          for (const col of receiptScanTargets) {
+            try {
+              const o = await publicClient.readContract({
+                address: col,
+                abi: erc721Abi,
+                functionName: "ownerOf",
+                args: [BigInt(id)],
+              }) as Address;
+              if (isAddress(o, { strict: false }) && getAddress(o) === me) {
+                return { collection: getAddress(col) };
+              }
+            } catch {
+              /* not minted on this collection or RPC */
+            }
           }
+          return null;
         },
         staleTime: 12_000,
       }));
@@ -1466,60 +1546,80 @@ export default function App() {
     ownershipQueries.length === 0 ||
     ownershipQueries.every((q) => q.status === "success" || q.status === "error");
 
-  const walletOwnedReceiptIds = useMemo(() => {
+  const walletOwnedReceipts = useMemo(() => {
     if (!address || !ownershipReady) return [];
-    const me = getAddress(address);
-    const out: string[] = [];
+    const out: { tokenId: string; collection: Address }[] = [];
     for (let i = 0; i < idsForWatch.length; i++) {
       const q = ownershipQueries[i];
       if (q.status !== "success" || !q.data) continue;
-      const o = q.data as string;
-      if (!isAddress(o)) continue;
-      try {
-        if (getAddress(o) === me) out.push(idsForWatch[i]);
-      } catch {
-        /* skip */
-      }
+      const row = q.data as { collection: Address };
+      out.push({ tokenId: idsForWatch[i], collection: row.collection });
     }
-    return out.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
+    return out.sort((a, b) =>
+      a.collection.toLowerCase() !== b.collection.toLowerCase()
+        ? a.collection.toLowerCase().localeCompare(b.collection.toLowerCase())
+        : (BigInt(a.tokenId) < BigInt(b.tokenId) ? -1 : BigInt(a.tokenId) > BigInt(b.tokenId) ? 1 : 0),
+    );
   }, [address, idsForWatch, ownershipQueries, ownershipReady]);
 
+  /** Drop scan hits that are no longer owned; keep pasted manual IDs so users see feedback instead of “nothing happened”. */
   useEffect(() => {
     if (!ownershipReady || !address) return;
-    const me = getAddress(address);
-    const keepId = (id: string) => {
+    const keepScanned = (id: string) => {
       const i = idsForWatch.indexOf(id);
       if (i < 0) return true;
       const q = ownershipQueries[i];
-      if (q?.status !== "success" || !q.data) return false;
-      try {
-        return isAddress(q.data as string) && getAddress(q.data as Address) === me;
-      } catch {
-        return false;
-      }
+      if (q?.status === "error") return true;
+      if (q?.status !== "success") return true;
+      return q.data !== null;
     };
-    setScannedIds((prev) => prev.filter(keepId));
-    setManualIds((prev) => prev.filter(keepId));
+    setScannedIds((prev) => prev.filter(keepScanned));
   }, [ownershipReady, address, idsForWatch, ownershipQueries]);
 
-  const unlistedBfrrIds = useMemo(
-    () => walletOwnedReceiptIds.filter((id) => !myListedTokenIds.has(id)),
-    [walletOwnedReceiptIds, myListedTokenIds],
+  const manualIdWatchHints = useMemo(() => {
+    if (!address || receiptScanTargets.length === 0) return [];
+    return manualIds.filter((id) => idsForWatch.includes(id)).map((id) => {
+      const i = idsForWatch.indexOf(id);
+      const q = i >= 0 ? ownershipQueries[i] : undefined;
+      const owned = Boolean(
+        ownershipReady &&
+          q?.status === "success" &&
+          q.data !== null &&
+          q.data !== undefined,
+      );
+      if (owned) return null;
+      let label = "Checking on Base…";
+      if (q?.status === "error") {
+        label = "Could not verify (RPC error). Try Refresh or another RPC.";
+      } else if (ownershipReady && q?.status === "success" && (q.data === null || q.data === undefined)) {
+        label =
+          "This wallet is not ownerOf that id on your configured BFRR contracts, or the id does not exist there. Add the receipt contract to VITE_RECEIPT_COLLECTION_ALIASES if it is a legacy collection.";
+      }
+      return { id, label };
+    }).filter((x): x is { id: string; label: string } => x !== null);
+  }, [address, manualIds, idsForWatch, ownershipQueries, ownershipReady, receiptScanTargets.length]);
+
+  const unlistedBfrrReceipts = useMemo(
+    () =>
+      walletOwnedReceipts.filter(
+        (r) => !myListedKeys.has(receiptRowKey(r.collection, r.tokenId)),
+      ),
+    [walletOwnedReceipts, myListedKeys],
   );
 
   const positionQueries = useQueries({
     queries: (() => {
-      if (!publicClient || !collection || wrongNetwork || !ownershipReady) return [];
-      return walletOwnedReceiptIds.map((id) => ({
-        queryKey: ["bfrr-position-bankr-dedupe", collection, id],
+      if (!publicClient || !ownershipReady) return [];
+      return walletOwnedReceipts.map((r) => ({
+        queryKey: ["bfrr-position-bankr-dedupe", r.collection, r.tokenId],
         queryFn: async () => {
-          if (!publicClient || !collection) return null;
+          if (!publicClient) return null;
           try {
             return await publicClient.readContract({
-              address: collection,
+              address: r.collection,
               abi: bankrFeeRightsReceiptAbi,
               functionName: "positionOf",
-              args: [BigInt(id)],
+              args: [BigInt(r.tokenId)],
             }) as {
               feeManager: Address;
               poolId: Hex;
@@ -1541,7 +1641,7 @@ export default function App() {
     idsForWatch.length === 0 ||
     (!ownershipReady
       ? false
-      : walletOwnedReceiptIds.length === 0 ||
+      : walletOwnedReceipts.length === 0 ||
         positionQueries.length === 0 ||
         positionQueries.every((q) => q.status === "success" || q.status === "error"));
 
@@ -1568,9 +1668,15 @@ export default function App() {
   }, [bankrRows, heldPoolIds, idsForWatch.length, bfrrDedupeReady]);
 
   useEffect(() => {
-    if (!ownershipReady || !selectedId) return;
-    if (!walletOwnedReceiptIds.includes(selectedId)) setSelectedId(null);
-  }, [ownershipReady, selectedId, walletOwnedReceiptIds]);
+    if (!ownershipReady || !selectedReceiptKey) return;
+    if (
+      !walletOwnedReceipts.some(
+        (r) => receiptRowKey(r.collection, r.tokenId) === selectedReceiptKey,
+      )
+    ) {
+      setSelectedReceiptKey(null);
+    }
+  }, [ownershipReady, selectedReceiptKey, walletOwnedReceipts]);
 
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
@@ -1628,9 +1734,9 @@ export default function App() {
   }, [address]);
 
   useEffect(() => {
-    if (!isConnected || !address || wrongNetwork) return;
+    if (!isConnected || !address) return;
     void loadBankrLaunches();
-  }, [isConnected, address, wrongNetwork, loadBankrLaunches]);
+  }, [isConnected, address, loadBankrLaunches]);
 
   return (
     <div>
@@ -1796,7 +1902,7 @@ export default function App() {
               <h1>My profile</h1>
               <p className="muted">Your wallet and items on Base.</p>
             </div>
-            {isConnected && address && !wrongNetwork && collection && marketplace && (
+            {isConnected && address && marketplace && receiptScanTargets.length > 0 && (
               <button
                 type="button"
                 className="btn btn-primary btn-sm profile-hero__refresh"
@@ -1858,9 +1964,9 @@ export default function App() {
             </div>
           )}
 
-          {isConnected && address && !wrongNetwork && (
+          {isConnected && address && (
             <>
-              {collection && marketplace && (
+              {receiptScanTargets.length > 0 && marketplace && (
                 <p className="muted profile-flow-lead">
                   <strong>1</strong> Eligible token → <strong>2</strong> receipt in your wallet → <strong>3</strong> listed here.
                   <InfoTip label="What each step means">
@@ -1877,7 +1983,7 @@ export default function App() {
                 </p>
               )}
 
-              {collection && marketplace && (
+              {receiptScanTargets.length > 0 && marketplace && (
                 <section className="bankr-panel">
                   <div className="section-head">
                     <h2 className="section-head__title">
@@ -2061,7 +2167,7 @@ export default function App() {
                 </section>
               )}
 
-              {collection && marketplace && (
+              {receiptScanTargets.length > 0 && marketplace && (
                 <section>
                   <div className="section-head">
                     <h2 className="section-head__title">
@@ -2074,14 +2180,14 @@ export default function App() {
                       </InfoTip>
                     </h2>
                     <span className="scan-status">
-                      {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrIds.length} not listed`}
+                      {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrReceipts.length} not listed`}
                     </span>
                   </div>
                   <p className="muted one-liner">Receipts in your wallet that are not listed here yet.</p>
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
-                  {!scanning && unlistedBfrrIds.length === 0 && ownershipReady && walletOwnedReceiptIds.length === 0 && idsForWatch.length === 0 && (
+                  {!scanning && unlistedBfrrReceipts.length === 0 && ownershipReady && walletOwnedReceipts.length === 0 && idsForWatch.length === 0 && (
                     <p className="empty">No receipt found in our scan.</p>
                   )}
 
@@ -2092,8 +2198,8 @@ export default function App() {
                         If our scan missed an NFT you already minted, add its numeric ID from{" "}
                         <a
                           href={
-                            collection
-                              ? `https://basescan.org/token/${collection}?a=${address ?? ""}`
+                            (collection ?? receiptScanTargets[0])
+                              ? `https://basescan.org/token/${collection ?? receiptScanTargets[0]}?a=${address ?? ""}`
                               : `https://basescan.org/address/${address ?? ""}`
                           }
                           target="_blank"
@@ -2114,106 +2220,156 @@ export default function App() {
                           className="mono"
                           placeholder="Paste token ID"
                           value={pasteId}
-                          onChange={(e) => setPasteId(e.target.value)}
+                          onChange={(e) => {
+                            setPasteId(e.target.value);
+                            setPasteIdErr(null);
+                          }}
                           spellCheck={false}
                         />
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
                           onClick={() => {
-                            const t = pasteId.trim();
-                            if (!t) return;
+                            const raw = pasteId.trim().replace(/\s+/g, "").replace(/,/g, "");
+                            if (!raw) return;
+                            setPasteIdErr(null);
+                            if (!/^\d+$/.test(raw)) {
+                              setPasteIdErr("Use decimal digits only (no 0x, no scientific notation).");
+                              return;
+                            }
                             try {
-                              const id = BigInt(t).toString();
+                              const id = BigInt(raw).toString();
                               setManualIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-                              setSelectedId(id);
+                              setSelectedReceiptKey(null);
                               setPasteId("");
                             } catch {
-                              /* invalid */
+                              setPasteIdErr("That value is not a valid integer token id.");
                             }
                           }}
                         >
                           Add
                         </button>
                       </div>
+                      {pasteIdErr && (
+                        <p className="err" style={{ fontSize: "0.78rem", marginTop: "0.4rem" }}>
+                          {pasteIdErr}
+                        </p>
+                      )}
+                      {manualIdWatchHints.length > 0 && (
+                        <ul className="muted" style={{ fontSize: "0.78rem", marginTop: "0.5rem", lineHeight: 1.45, paddingLeft: "1.1rem" }}>
+                          {manualIdWatchHints.map(({ id, label }) => (
+                            <li key={id} style={{ marginBottom: "0.35rem" }}>
+                              <span className="mono" title={id}>
+                                {id.length > 18 ? `${id.slice(0, 8)}…${id.slice(-6)}` : id}
+                              </span>
+                              {" — "}
+                              {label}
+                              {" "}
+                              <button
+                                type="button"
+                                className="link-btn"
+                                style={{ fontSize: "inherit" }}
+                                onClick={() => {
+                                  setManualIds((prev) => prev.filter((x) => x !== id));
+                                  setPasteIdErr(null);
+                                }}
+                              >
+                                Forget
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   </details>
 
                   <div className="profile-receipt-list">
-                    {unlistedBfrrIds.map((id) => (
+                    {unlistedBfrrReceipts.map((r) => {
+                      const rk = receiptRowKey(r.collection, r.tokenId);
+                      return (
                       <div
-                        key={id}
-                        className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}${redeemingForId === id || listingBusyTokenId === id ? " profile-receipt-row--pending" : ""}`}
+                        key={rk}
+                        className={`profile-receipt-row${selectedReceiptKey === rk ? " profile-receipt-row--open" : ""}${redeemingForReceiptKey === rk || listingBusyReceiptKey === rk ? " profile-receipt-row--pending" : ""}`}
                       >
                         <BfrrCard
-                          tokenId={id}
-                          collection={collection}
-                          selected={selectedId === id}
-                          wrongNetwork={wrongNetwork}
+                          tokenId={r.tokenId}
+                          collection={r.collection}
+                          selected={selectedReceiptKey === rk}
                           staticDisplay
                         />
                         <div className="profile-receipt-row__actions">
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            disabled={txDisabled || Boolean(listingBusyTokenId)}
-                            onClick={() => setSelectedId(id)}
+                            disabled={txDisabled || Boolean(listingBusyReceiptKey)}
+                            onClick={() => setSelectedReceiptKey(rk)}
                           >
                             List
                           </button>
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            disabled={txDisabled || Boolean(listingBusyTokenId)}
+                            disabled={txDisabled || Boolean(listingBusyReceiptKey)}
                             onClick={() => run(async () => {
-                              setRedeemingForId(id);
+                              setRedeemingForReceiptKey(rk);
                               try {
+                                if (!publicClient) return;
+                                let redeemEscrow: Address = ESCROW_ADDRESS;
+                                try {
+                                  const esc = await publicClient.readContract({
+                                    address: r.collection,
+                                    abi: bankrFeeRightsReceiptAbi,
+                                    functionName: "escrow",
+                                  }) as Address;
+                                  if (isAddress(esc, { strict: false })) redeemEscrow = getAddress(esc);
+                                } catch {
+                                  /* older receipt ABI — fall back */
+                                }
                                 await writeContractAsync({
-                                  address: ESCROW_ADDRESS,
+                                  address: redeemEscrow,
                                   abi: escrowAbi,
                                   functionName: "redeemRights",
-                                  args: [BigInt(id)],
+                                  args: [BigInt(r.tokenId)],
                                   chainId: MVP_CHAIN_ID,
                                 });
-                                setSelectedId(null);
+                                setSelectedReceiptKey(null);
                                 setScanEpoch((e) => e + 1);
                                 void refetchListings();
                               } finally {
-                                setRedeemingForId(null);
+                                setRedeemingForReceiptKey(null);
                               }
                             })}
                           >
-                            {redeemingForId === id ? (
+                            {redeemingForReceiptKey === rk ? (
                               <><span className="spinner" /> Returning…</>
                             ) : (
                               "Return to my wallet"
                             )}
                           </button>
                         </div>
-                        {redeemingForId === id && (
+                        {redeemingForReceiptKey === rk && (
                           <p className="profile-receipt-row__status muted">
                             Confirm in your wallet, then wait for Base to include the transaction.
                           </p>
                         )}
-                        {listingBusyTokenId === id && redeemingForId !== id && (
+                        {listingBusyReceiptKey === rk && redeemingForReceiptKey !== rk && (
                           <p className="profile-receipt-row__status muted">
                             <span className="spinner" /> Listing on Base… Your listings update when the transaction is confirmed.
                           </p>
                         )}
-                        {selectedId === id && (
+                        {selectedReceiptKey === rk && (
                           <div className="profile-receipt-row__panel">
                             <SellPanel
-                              tokenIdStr={id}
-                              collection={collection}
+                              tokenIdStr={r.tokenId}
+                              collection={r.collection}
                               marketplace={marketplace}
                               address={address}
                               txDisabled={txDisabled}
-                              wrongNetwork={wrongNetwork}
                               isConnected={isConnected}
-                              onListFlowStart={() => setListingBusyTokenId(id)}
-                              onListFlowEnd={() => setListingBusyTokenId(null)}
+                              onListFlowStart={() => setListingBusyReceiptKey(rk)}
+                              onListFlowEnd={() => setListingBusyReceiptKey(null)}
                               onDone={async () => {
-                                setSelectedId(null);
+                                setSelectedReceiptKey(null);
                                 await qc.invalidateQueries();
                                 await refetchListings();
                                 setScanEpoch((e) => e + 1);
@@ -2222,12 +2378,13 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 </section>
               )}
 
-              {(!collection || !marketplace) && (
+              {(!marketplace || receiptScanTargets.length === 0) && (
                 <p className="muted one-liner" style={{ marginTop: "1rem" }}>
                   Wallet and receipt features need a configured deployment (marketplace and BFRR addresses). If you expected this to work, contact the site operator.
                 </p>
@@ -2247,8 +2404,8 @@ export default function App() {
                 <p className="muted one-liner">What you are currently selling here.</p>
                 {myListings.length === 0 ? (
                   <p className="empty">
-                    {listingBusyTokenId || listingsFetching ? (
-                      <><span className="spinner" />{listingBusyTokenId ? "Finishing your listing — syncing with Base…" : "Loading listings…"}</>
+                    {listingBusyReceiptKey || listingsFetching ? (
+                      <><span className="spinner" />{listingBusyReceiptKey ? "Finishing your listing — syncing with Base…" : "Loading listings…"}</>
                     ) : (
                       "Nothing listed yet."
                     )}
