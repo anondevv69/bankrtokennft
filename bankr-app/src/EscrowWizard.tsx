@@ -492,7 +492,17 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
 
         {err && <p className="err">{err}</p>}
 
-        {next.kind === "blocked" && next.reason && <p className="err">{next.reason}</p>}
+        {next.kind === "blocked" && next.reason && (
+          <>
+            <p className="err">{next.reason}</p>
+            {/beneficiary/i.test(next.reason) && (
+              <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.55rem", lineHeight: 1.45 }}>
+                Bankr builds that transaction only if <span className="mono">{userAddress}</span> is the wallet that{" "}
+                <strong>currently</strong> receives trading fees for the token you entered. Fix: connect the launch / fee-recipient wallet (on Base), or re-check the <strong>launched token address</strong> and <strong>pool id</strong> match that launch. If Bankr still shows a different “fee wallet,” complete fee setup there first, or ask Bankr support which address must sign.
+              </p>
+            )}
+          </>
+        )}
 
         {next.kind === "already_escrowed" && (
           <p className="muted">Already done on-chain — use your BFRR below.</p>

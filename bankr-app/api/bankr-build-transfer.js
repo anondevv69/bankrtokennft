@@ -78,9 +78,16 @@ export default async function handler(req, res) {
   }
 
   if (!upstream.ok) {
-    res.status(upstream.status).json({
+    let extracted = "Bankr build-transfer returned an error";
+    if (out && typeof out === "object") {
+      if (typeof out.error === "string") extracted = out.error;
+      else if (typeof out.message === "string") extracted = out.message;
+    } else if (typeof out === "string" && out.trim()) {
+      extracted = out.trim().slice(0, 500);
+    }
+    res.status(200).json({
       ok: false,
-      error: "Bankr build-transfer returned an error",
+      error: extracted,
       status: upstream.status,
       body: typeof out === "string" ? out.slice(0, 2000) : out,
     });
