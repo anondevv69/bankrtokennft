@@ -25,7 +25,7 @@ import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId, rowLaunchedToken } from "./lib/escrowArgs";
+import { normalizePoolId, rowLaunchedToken, rowPoolIdHex } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -107,11 +107,6 @@ function launchRowLabel(row: Record<string, unknown>): string {
   const ta = row.tokenAddress;
   if (typeof ta === "string" && ta.length > 10) return `${ta.slice(0, 6)}…${ta.slice(-4)}`;
   return "Token";
-}
-
-/** Pool id from a Bankr API row, normalized for comparison with `positionOf.poolId`. */
-function launchRowPoolIdHex(row: Record<string, unknown>): Hex | null {
-  return normalizePoolId(row.poolId);
 }
 
 function launchRowHref(row: Record<string, unknown>, wallet: string): string {
@@ -666,34 +661,41 @@ export default function App() {
   );
 
   const positionQueries = useQueries({
-    queries: allTokenIds.map((id) => ({
-      queryKey: ["bfrr-position-bankr-dedupe", collection, id],
-      queryFn: async () => {
-        if (!publicClient || !collection) return null;
-        try {
-          return await publicClient.readContract({
-            address: collection,
-            abi: bankrFeeRightsReceiptAbi,
-            functionName: "positionOf",
-            args: [BigInt(id)],
-          }) as {
-            feeManager: Address;
-            poolId: Hex;
-            token0: Address;
-            token1: Address;
-            seller: Address;
-            factoryName: string;
-          };
-        } catch {
-          return null;
-        }
-      },
-      enabled: Boolean(
-        publicClient && collection && !wrongNetwork && id.length > 0 && /^\d+$/.test(id),
-      ),
-      staleTime: 15_000,
-    })),
+    queries: (() => {
+      if (!publicClient || !collection || wrongNetwork) return [];
+      return allTokenIds
+        .filter((id) => id.length > 0 && /^\d+$/.test(id))
+        .map((id) => ({
+          queryKey: ["bfrr-position-bankr-dedupe", collection, id],
+          queryFn: async () => {
+            if (!publicClient || !collection) return null;
+            try {
+              return await publicClient.readContract({
+                address: collection,
+                abi: bankrFeeRightsReceiptAbi,
+                functionName: "positionOf",
+                args: [BigInt(id)],
+              }) as {
+                feeManager: Address;
+                poolId: Hex;
+                token0: Address;
+                token1: Address;
+                seller: Address;
+                factoryName: string;
+              };
+            } catch {
+              return null;
+            }
+          },
+          staleTime: 15_000,
+        }));
+    })(),
   });
+
+  const bfrrDedupeReady =
+    allTokenIds.length === 0 ||
+    positionQueries.length === 0 ||
+    positionQueries.every((q) => q.status === "success" || q.status === "error");
 
   const { heldPoolIds, heldPairTokens } = useMemo(() => {
     const pools = new Set<string>();
@@ -713,15 +715,16 @@ export default function App() {
   }, [positionQueries]);
 
   const bankrRowsNotYetReceived = useMemo(() => {
+    if (allTokenIds.length > 0 && !bfrrDedupeReady) return [];
     if (heldPoolIds.size === 0 && heldPairTokens.size === 0) return bankrRows;
     return bankrRows.filter((row) => {
-      const pid = launchRowPoolIdHex(row);
+      const pid = rowPoolIdHex(row);
       if (pid && heldPoolIds.has(pid.toLowerCase())) return false;
       const tok = rowLaunchedToken(row);
       if (tok && heldPairTokens.has(tok.toLowerCase())) return false;
       return true;
     });
-  }, [bankrRows, heldPoolIds, heldPairTokens]);
+  }, [bankrRows, heldPoolIds, heldPairTokens, allTokenIds.length, bfrrDedupeReady]);
 
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
@@ -1137,6 +1140,11 @@ export default function App() {
                 <p className="muted one-liner">
                   Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
                 </p>
+                {allTokenIds.length > 0 && !bfrrDedupeReady && (
+                  <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
+                    Matching Bankr fee rows to receipts already in this wallet…
+                  </p>
+                )}
                 {bankrRowsNotYetReceived.length > 0 ? (
                   <ul className="bankr-panel__list">
                     {bankrRowsNotYetReceived.map((row, i) => {
@@ -1179,14 +1187,14 @@ export default function App() {
                     <>
                       {bankrErr ? (
                         <p className="err one-liner">{bankrErr}</p>
-                      ) : bankrRows.length > 0 ? (
-                        <p className="muted one-liner">
-                          Bankr still lists fee launches below, but each one already lines up with a receipt in your wallet (see <strong>Ready to list</strong> above). <strong>Refresh</strong> if you just minted, sold, or redeemed.
-                        </p>
-                      ) : (
+                      ) : bankrRows.length === 0 ? (
                         <p className="muted one-liner">
                           No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
                           <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> with the same wallet.
+                        </p>
+                      ) : !bfrrDedupeReady ? null : (
+                        <p className="muted one-liner">
+                          Bankr still lists fee launches below, but each one already lines up with a receipt in your wallet (see <strong>Ready to list</strong> above). <strong>Refresh</strong> if you just minted, sold, or redeemed.
                         </p>
                       )}
                       <div className="bankr-panel__manual">

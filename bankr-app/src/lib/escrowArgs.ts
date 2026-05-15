@@ -19,12 +19,25 @@ export function normalizePoolId(raw: unknown): Hex | null {
   return `0x${body}` as Hex;
 }
 
+/** Launched ERC-20 from a Bankr `creator-fees` / launches row (field names vary). */
 export function rowLaunchedToken(row: Record<string, unknown>): Address | null {
-  const ta = row.tokenAddress;
-  if (typeof ta !== "string" || !ta.startsWith("0x") || !isAddress(ta, { strict: false })) return null;
-  try {
-    return getAddress(ta);
-  } catch {
-    return null;
+  for (const k of ["tokenAddress", "contractAddress", "ca", "mint", "contract", "token"]) {
+    const v = row[k];
+    if (typeof v !== "string" || !v.startsWith("0x") || !isAddress(v, { strict: false })) continue;
+    try {
+      return getAddress(v);
+    } catch {
+      continue;
+    }
   }
+  return null;
+}
+
+/** `bytes32` pool id when the API sends a full 66-char hex string. */
+export function rowPoolIdHex(row: Record<string, unknown>): Hex | null {
+  for (const k of ["poolId", "pool_id", "poolID"]) {
+    const n = normalizePoolId(row[k]);
+    if (n) return n;
+  }
+  return null;
 }
