@@ -493,7 +493,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   return (
     <div className="sell-panel">
       <div className="sell-panel__title">
-        List for sale
+        Set price
         <span className="tag mono">{tokenIdStr.slice(0, 6)}…{tokenIdStr.slice(-4)}</span>
         <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }}
           onClick={onDone}>✕</button>
@@ -515,7 +515,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
         </button>
         {!canPull && !listBusy && (
           <p className="muted sell-actions__hint">
-            The first time you list this receipt, your wallet will ask you to approve the marketplace, then to confirm the listing. Both steps run from this button.
+            First listing: your wallet may prompt twice; this button runs approve then list in order.
           </p>
         )}
       </div>
@@ -989,7 +989,7 @@ export default function App() {
         <>
           <div className="hero hero--compact">
             <h1>My profile</h1>
-            <p className="muted">Wallet, your listings, and items you can sell.</p>
+            <p className="muted">Wallet, listings, and listing setup on Base.</p>
           </div>
 
           {!isConnected && (
@@ -1040,61 +1040,199 @@ export default function App() {
 
           {isConnected && address && !wrongNetwork && (
             <>
-              <section>
-                <div className="section-head">
-                  <h2>Your listings</h2>
-                  <span className="scan-status">{myListings.length} active</span>
-                </div>
-                <p className="muted one-liner">Items you have listed for sale. Cancel returns the token to your wallet.</p>
-                {myListings.length === 0 ? (
-                  <p className="empty">You have no active listings.</p>
-                ) : (
-                  <div className="listings-grid">
-                    {myListings.map((li) => (
-                      <ListingCard
-                        key={li.listingId.toString()}
-                        li={li}
-                        bfrr={collection}
-                        address={address}
-                        txDisabled={txDisabled}
-                        isConnected={isConnected}
-                        wrongNetwork={wrongNetwork}
-                        onBuy={() => {}}
-                        onCancel={() => run(async () => {
-                          if (!marketplace) return;
-                          await writeContractAsync({
-                            address: marketplace,
-                            abi: feeRightsFixedSaleAbi,
-                            functionName: "cancel",
-                            args: [li.listingId],
-                            chainId: MVP_CHAIN_ID,
-                          });
-                        })}
-                      />
-                    ))}
+              {collection && marketplace && (
+                <p className="muted" style={{ fontSize: "0.78rem", lineHeight: 1.45, marginBottom: "1rem" }}>
+                  <strong>1</strong> Tokens that could be listed — <strong>List</strong> completes escrow and mints a receipt (up to three Base txs).
+                  {" "}
+                  <strong>2</strong> Receipt in your wallet — <strong>List</strong> sets your sale price; approve + list use one control.
+                  {" "}
+                  <strong>3</strong> <strong>Listed</strong> shows under Your listings; <strong>Return to my wallet</strong> leaves escrow without a marketplace listing.
+                </p>
+              )}
+
+              {collection && marketplace && (
+                <section className="bankr-panel">
+                  <div className="section-head">
+                    <h2>Tokens that could be listed</h2>
+                    <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
+                      {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
+                    </button>
                   </div>
-                )}
-              </section>
+                  <p className="muted one-liner">Launches where you earn Bankr fees. <strong>List</strong> opens setup so a receipt can appear in step 2.</p>
+                  {idsForWatch.length > 0 && !bfrrDedupeReady && (
+                    <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
+                      Matching Bankr rows to receipts already in this wallet…
+                    </p>
+                  )}
+                  {bankrRowsNotYetReceived.length > 0 ? (
+                    <ul className="bankr-panel__list">
+                      {bankrRowsNotYetReceived.map((row, i) => {
+                        const ta = row.tokenAddress;
+                        const pid = row.poolId;
+                        const key =
+                          typeof ta === "string" && ta.startsWith("0x")
+                            ? ta.toLowerCase()
+                            : typeof pid === "string"
+                              ? `${pid}-${i}`
+                              : `row-${i}`;
+                        return (
+                          <li key={key}>
+                            <div className="bankr-panel__row">
+                              <span className="bankr-panel__name">{launchRowLabel(row)}</span>
+                              <a
+                                className="bankr-panel__row-ext"
+                                href={launchRowHref(row, address ?? "")}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="Open on Bankr"
+                              >
+                                ↗
+                              </a>
+                              <button
+                                type="button"
+                                className="bankr-panel__mint btn btn-ghost btn-sm"
+                                disabled={wrongNetwork}
+                                onClick={() => setEscrowWizardRow(row)}
+                              >
+                                List
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    !bankrLoading && (
+                      <>
+                        {bankrErr ? (
+                          <p className="err one-liner">{bankrErr}</p>
+                        ) : bankrRows.length === 0 ? (
+                          <p className="muted one-liner">
+                            No Bankr fee rows right now — try <strong>Refresh</strong> or{" "}
+                            <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>.
+                          </p>
+                        ) : !bfrrDedupeReady ? null : (
+                          <p className="muted one-liner">
+                            These launches already match a receipt in your wallet (see <strong>Receipt in your wallet</strong> below). <strong>Refresh</strong> if this looks wrong.
+                          </p>
+                        )}
+                        <div className="bankr-panel__manual">
+                          <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.35rem" }}>
+                            Backup if your launch is missing above: pool id + token; add fee manager if you already transferred fees to escrow.
+                          </p>
+                          {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
+                          <details className="bfrr-primer" style={{ marginBottom: "0.65rem" }}>
+                            <summary>Where do I find this? (2 minutes)</summary>
+                            <div className="bfrr-primer__body" style={{ fontSize: "0.82rem" }}>
+                              <ol style={{ margin: "0.35rem 0 0 1.1rem", padding: 0 }}>
+                                <li style={{ marginBottom: "0.35rem" }}>
+                                  <strong>Pool ID</strong> — On{" "}
+                                  <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s transaction <strong>Prepare deposit</strong> (method to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>). Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy the argument named like <span className="mono">poolId</span> — it must be <strong>0x</strong> plus <strong>64</strong> hex characters (66 characters total). If you copy the whole input string or a shorter hex, this box will error until it is exactly that length.
+                                </li>
+                                <li style={{ marginBottom: "0.35rem" }}>
+                                  <strong>Fee manager (optional)</strong> — Same decoded tx: the first address argument (<span className="mono">feeManager</span>). Paste it if you <strong>already moved fees to escrow</strong> (Bankr then says you are “not a beneficiary”); the app uses it to offer <strong>Finalize / mint receipt</strong> without calling Bankr again.
+                                </li>
+                                <li>
+                                  <strong>Launched token address</strong> — The ERC-20 you launched (the coin contract traders swap), <strong>not</strong> the BFRR receipt contract and <strong>not</strong> the marketplace. Same launch page on Bankr often shows “contract” or “token address”.
+                                </li>
+                              </ol>
+                            </div>
+                          </details>
+                          <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.2rem" }}>1. Pool id (bytes32)</label>
+                          <div className="profile-paste-row" style={{ marginTop: 0 }}>
+                            <input
+                              className="mono"
+                              placeholder="0x + 64 hex chars (from Prepare deposit → decode)"
+                              value={receiptManualPool}
+                              onChange={(e) => {
+                                setReceiptManualPool(e.target.value);
+                                setReceiptManualErr(null);
+                              }}
+                              spellCheck={false}
+                            />
+                          </div>
+                          <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>2. Your launch token contract</label>
+                          <div className="profile-paste-row" style={{ marginTop: 0 }}>
+                            <input
+                              className="mono"
+                              placeholder="0x… token address (42 chars)"
+                              value={receiptManualToken}
+                              onChange={(e) => {
+                                setReceiptManualToken(e.target.value);
+                                setReceiptManualErr(null);
+                              }}
+                              spellCheck={false}
+                            />
+                          </div>
+                          <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>
+                            3. Fee manager (optional — from same Prepare tx, first address)
+                          </label>
+                          <div className="profile-paste-row" style={{ marginTop: 0 }}>
+                            <input
+                              className="mono"
+                              placeholder="0x… feeManager — paste if “not a beneficiary” after you already transferred fees to escrow"
+                              value={receiptManualFeeManager}
+                              onChange={(e) => {
+                                setReceiptManualFeeManager(e.target.value);
+                                setReceiptManualErr(null);
+                              }}
+                              spellCheck={false}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              disabled={wrongNetwork}
+                              onClick={() => {
+                                const pid = normalizePoolId(receiptManualPool.trim());
+                                const tok = tryParseAddress(receiptManualToken.trim());
+                                const fmOpt = tryParseAddress(receiptManualFeeManager.trim());
+                                if (!pid) {
+                                  setReceiptManualErr(explainPoolIdPasteError(receiptManualPool));
+                                  return;
+                                }
+                                if (!tok) {
+                                  setReceiptManualErr("Enter the launched token as a normal 0x address (40 hex digits).");
+                                  return;
+                                }
+                                setReceiptManualErr(null);
+                                const row: Record<string, unknown> = {
+                                  poolId: pid,
+                                  tokenAddress: tok,
+                                  tokenSymbol: "Token",
+                                };
+                                if (fmOpt) row.feeManager = fmOpt;
+                                setEscrowWizardRow(row);
+                              }}
+                            >
+                              Open listing setup
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )
+                  )}
+                </section>
+              )}
 
               {collection && marketplace && (
                 <section>
                   <div className="section-head">
-                    <h2>Ready to list</h2>
+                    <h2>Receipt in your wallet</h2>
                     <span className="scan-status">
-                      {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrIds.length} in wallet`}
+                      {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrIds.length} not listed`}
                     </span>
                   </div>
                   <p className="muted one-liner">
-                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Return to my wallet</strong> to pull the receipt out of Bankr escrow.
+                    BFRRs you hold that are not on the marketplace. <strong>List</strong> sets price (one control). <strong>Return to my wallet</strong> exits Bankr escrow without a sale listing.
                   </p>
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
                   {!scanning && unlistedBfrrIds.length === 0 && ownershipReady && walletOwnedReceiptIds.length === 0 && idsForWatch.length === 0 && (
                     <>
-                      <p className="empty">No receipts detected from our recent scan.</p>
+                      <p className="empty">No BFRR in this wallet from our scan.</p>
                       <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
-                        Nothing here does not mean your token “disappeared.” If escrow finished, you should have a BFRR (receipt NFT) on Base — open{" "}
+                        Paste the token ID from{" "}
                         <a
                           href={
                             collection
@@ -1106,7 +1244,7 @@ export default function App() {
                         >
                           BaseScan
                         </a>
-                        {" "}for this wallet, copy the token ID, and paste it above. Use the same wallet and network (Base) you used for escrow.
+                        {" "}if you already minted one. Same wallet and Base network as escrow.
                       </p>
                     </>
                   )}
@@ -1156,7 +1294,7 @@ export default function App() {
                             disabled={txDisabled}
                             onClick={() => setSelectedId(id)}
                           >
-                            Sell
+                            List
                           </button>
                           <button
                             type="button"
@@ -1208,178 +1346,52 @@ export default function App() {
                 </p>
               )}
 
-              <section className="bankr-panel">
+              {marketplace && (
+              <section>
                 <div className="section-head">
-                  <h2>Waiting on a receipt</h2>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={bankrLoading} onClick={() => void loadBankrLaunches()}>
-                    {bankrLoading ? <><span className="spinner" />Loading…</> : "Refresh"}
-                  </button>
+                  <h2>Your listings</h2>
+                  <span className="scan-status">{myListings.length} active</span>
                 </div>
-                <p className="muted one-liner">
-                  Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
-                </p>
-                {idsForWatch.length > 0 && !bfrrDedupeReady && (
-                  <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
-                    Matching Bankr fee rows to receipts already in this wallet…
-                  </p>
-                )}
-                {bankrRowsNotYetReceived.length > 0 ? (
-                  <ul className="bankr-panel__list">
-                    {bankrRowsNotYetReceived.map((row, i) => {
-                      const ta = row.tokenAddress;
-                      const pid = row.poolId;
-                      const key =
-                        typeof ta === "string" && ta.startsWith("0x")
-                          ? ta.toLowerCase()
-                          : typeof pid === "string"
-                            ? `${pid}-${i}`
-                            : `row-${i}`;
-                      return (
-                        <li key={key}>
-                          <div className="bankr-panel__row">
-                            <span className="bankr-panel__name">{launchRowLabel(row)}</span>
-                            <a
-                              className="bankr-panel__row-ext"
-                              href={launchRowHref(row, address ?? "")}
-                              target="_blank"
-                              rel="noreferrer"
-                              title="Open on Bankr"
-                            >
-                              ↗
-                            </a>
-                            <button
-                              type="button"
-                              className="bankr-panel__mint btn btn-ghost btn-sm"
-                              disabled={wrongNetwork}
-                              onClick={() => setEscrowWizardRow(row)}
-                            >
-                              Get receipt
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                <p className="muted one-liner">Listed on Bankr Sale. Cancel listing returns the receipt to your wallet.</p>
+                {myListings.length === 0 ? (
+                  <p className="empty">Nothing listed yet.</p>
                 ) : (
-                  !bankrLoading && (
-                    <>
-                      {bankrErr ? (
-                        <p className="err one-liner">{bankrErr}</p>
-                      ) : bankrRows.length === 0 ? (
-                        <p className="muted one-liner">
-                          No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
-                          <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> with the same wallet.
-                        </p>
-                      ) : !bfrrDedupeReady ? null : (
-                        <p className="muted one-liner">
-                          Bankr still lists fee launches below, but each one already lines up with a receipt in your wallet (see <strong>Ready to list</strong> above). <strong>Refresh</strong> if you just minted, sold, or redeemed.
-                        </p>
-                      )}
-                      <div className="bankr-panel__manual">
-                        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.35rem" }}>
-                          Bankr did not return your launch in the list above, so this is a <strong>backup path</strong> — normally you would not need it. Paste pool id + token; add fee manager if you already completed the fee transfer step.
-                        </p>
-                        {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
-                        <details className="bfrr-primer" style={{ marginBottom: "0.65rem" }}>
-                          <summary>Where do I find this? (2 minutes)</summary>
-                          <div className="bfrr-primer__body" style={{ fontSize: "0.82rem" }}>
-                            <ol style={{ margin: "0.35rem 0 0 1.1rem", padding: 0 }}>
-                              <li style={{ marginBottom: "0.35rem" }}>
-                                <strong>Pool ID</strong> — On{" "}
-                                <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s transaction <strong>Prepare deposit</strong> (method to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>). Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy the argument named like <span className="mono">poolId</span> — it must be <strong>0x</strong> plus <strong>64</strong> hex characters (66 characters total). If you copy the whole input string or a shorter hex, this box will error until it is exactly that length.
-                              </li>
-                              <li style={{ marginBottom: "0.35rem" }}>
-                                <strong>Fee manager (optional)</strong> — Same decoded tx: the first address argument (<span className="mono">feeManager</span>). Paste it if you <strong>already moved fees to escrow</strong> (Bankr then says you are “not a beneficiary”); the app uses it to offer <strong>Finalize / mint receipt</strong> without calling Bankr again.
-                              </li>
-                              <li>
-                                <strong>Launched token address</strong> — The ERC-20 you launched (the coin contract traders swap), <strong>not</strong> the BFRR receipt contract and <strong>not</strong> the marketplace. Same launch page on Bankr often shows “contract” or “token address”.
-                              </li>
-                            </ol>
-                          </div>
-                        </details>
-                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.2rem" }}>1. Pool id (bytes32)</label>
-                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
-                          <input
-                            className="mono"
-                            placeholder="0x + 64 hex chars (from Prepare deposit → decode)"
-                            value={receiptManualPool}
-                            onChange={(e) => {
-                              setReceiptManualPool(e.target.value);
-                              setReceiptManualErr(null);
-                            }}
-                            spellCheck={false}
-                          />
-                        </div>
-                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>2. Your launch token contract</label>
-                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
-                          <input
-                            className="mono"
-                            placeholder="0x… token address (42 chars)"
-                            value={receiptManualToken}
-                            onChange={(e) => {
-                              setReceiptManualToken(e.target.value);
-                              setReceiptManualErr(null);
-                            }}
-                            spellCheck={false}
-                          />
-                        </div>
-                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>
-                          3. Fee manager (optional — from same Prepare tx, first address)
-                        </label>
-                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
-                          <input
-                            className="mono"
-                            placeholder="0x… feeManager — paste if “not a beneficiary” after you already transferred fees to escrow"
-                            value={receiptManualFeeManager}
-                            onChange={(e) => {
-                              setReceiptManualFeeManager(e.target.value);
-                              setReceiptManualErr(null);
-                            }}
-                            spellCheck={false}
-                          />
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            disabled={wrongNetwork}
-                            onClick={() => {
-                              const pid = normalizePoolId(receiptManualPool.trim());
-                              const tok = tryParseAddress(receiptManualToken.trim());
-                              const fmOpt = tryParseAddress(receiptManualFeeManager.trim());
-                              if (!pid) {
-                                setReceiptManualErr(explainPoolIdPasteError(receiptManualPool));
-                                return;
-                              }
-                              if (!tok) {
-                                setReceiptManualErr("Enter the launched token as a normal 0x address (40 hex digits).");
-                                return;
-                              }
-                              setReceiptManualErr(null);
-                              const row: Record<string, unknown> = {
-                                poolId: pid,
-                                tokenAddress: tok,
-                                tokenSymbol: "Token",
-                              };
-                              if (fmOpt) row.feeManager = fmOpt;
-                              setEscrowWizardRow(row);
-                            }}
-                          >
-                            Open Get receipt
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )
+                  <div className="listings-grid">
+                    {myListings.map((li) => (
+                      <ListingCard
+                        key={li.listingId.toString()}
+                        li={li}
+                        bfrr={collection}
+                        address={address}
+                        txDisabled={txDisabled}
+                        isConnected={isConnected}
+                        wrongNetwork={wrongNetwork}
+                        onBuy={() => {}}
+                        onCancel={() => run(async () => {
+                          if (!marketplace) return;
+                          await writeContractAsync({
+                            address: marketplace,
+                            abi: feeRightsFixedSaleAbi,
+                            functionName: "cancel",
+                            args: [li.listingId],
+                            chainId: MVP_CHAIN_ID,
+                          });
+                        })}
+                      />
+                    ))}
+                  </div>
                 )}
               </section>
+              )}
 
               <details className="bfrr-primer bfrr-primer--profile">
                 <summary>What is a receipt?</summary>
                 <div className="bfrr-primer__body">
                   <p>
-                    Only on-chain receipts can be sold here. If you earn fees on Bankr but do not see a token under <strong>Ready to list</strong>, use <strong>Get receipt</strong> or ask on{" "}
-                    <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>.
-                    {" "}
-                    <a href="https://docs.bankr.bot/token-launching/transferring-fees/" target="_blank" rel="noreferrer">Learn more</a>
+                    A receipt is the BFRR NFT on Base. Use <strong>List</strong> under tokens that could be listed, or <strong>List</strong> on a receipt in your wallet to set a price. Questions:{" "}
+                    <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a>
+                    {" · "}
+                    <a href="https://docs.bankr.bot/token-launching/transferring-fees/" target="_blank" rel="noreferrer">Docs</a>
                   </p>
                 </div>
               </details>

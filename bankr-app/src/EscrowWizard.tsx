@@ -301,7 +301,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
       setNext({
         kind: "blocked",
         reason:
-          "Could not determine the fee manager contract. Add the optional “Fee manager” field from your Prepare deposit transaction (first address in the decoded input) and open Get receipt again.",
+          "Could not determine the fee manager contract. Add the optional “Fee manager” field from your Prepare deposit transaction (first address in the decoded input) and open listing setup again.",
       });
       return;
     }
@@ -473,14 +473,14 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
         <div className="settings-sheet__head">
-          <h3>Get receipt</h3>
+          <h3>List on Bankr Sale</h3>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             ✕
           </button>
         </div>
 
         <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.65rem" }}>
-          <strong>{label}</strong> — <strong>three separate transactions on Base</strong> (escrow and Bankr cannot combine them into one). Finish each step and wait for confirming on Base before the next button appears.
+          <strong>{label}</strong> — escrow and Bankr need <strong>up to three separate Base transactions</strong>. Confirm each on-chain before the next step appears.
         </p>
 
         {wrongChain && (
