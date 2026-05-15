@@ -190,6 +190,54 @@ prepareDeposit → updateBeneficiary → finalizeDeposit (mints receipt) → opt
 
 Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor` on escrow.
 
+### Deploy `BankrEscrowV3` on Base mainnet (production redeploy)
+
+`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt (BFRR)**. Redeploy when you want new on-chain SVG/metadata (e.g. ticker/token-name art); **existing** BFRRs on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
+
+**1. Pick fee managers**
+
+Set `INITIAL_FEE_MANAGERS` to the **actual** Bankr (or compatible `IBankrFees`) fee manager contract(s) used on **Base mainnet** for pools you care about. Wrong addresses ⇒ `prepareDeposit` will fail `FeeManagerNotAllowed` or `getShares` will not match. Verify per pool if unsure (same rules as in `skills/bankr-fee-rights`).
+
+**2. Simulate, then broadcast**
+
+```shell
+cd fee-rights-exchange
+source .env   # PRIVATE_KEY, and e.g. BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...
+
+export FACTORY_NAME="Bankr"
+export INITIAL_FEE_MANAGERS=0xYourMainnetFeeManager,0xOptionalSecond
+# Optional: export ESCROW_INITIAL_OWNER=0x...   # defaults to deployer
+
+forge script script/DeployBankrEscrowV3.s.sol \
+  --rpc-url "$BASE_MAINNET_RPC_URL" \
+  --private-key "$PRIVATE_KEY"
+
+forge script script/DeployBankrEscrowV3.s.sol \
+  --rpc-url "$BASE_MAINNET_RPC_URL" \
+  --private-key "$PRIVATE_KEY" \
+  --broadcast \
+  --verify \
+  --etherscan-api-key "$ETHERSCAN_API_KEY"
+```
+
+Use a [Basescan API key](https://basescan.org/apis) as `ETHERSCAN_API_KEY` (Foundry passes it to the Blockscout-compatible verifier for Base).
+
+**3. Save the printed addresses**
+
+The script logs `BankrEscrowV3 deployed:` and `BankrFeeRightsReceipt deployed:`. You need both for the frontend.
+
+**4. Rebuild the app (Vercel / CI)**
+
+Set or update **before** `npm run build`:
+
+| Variable | Set to |
+|----------|--------|
+| `VITE_ESCROW_ADDRESS` | New escrow address |
+| `VITE_DEFAULT_RECEIPT_COLLECTION` | **New** `BankrFeeRightsReceipt` (from `escrow.receipt()` on BaseScan) |
+| `VITE_RECEIPT_COLLECTION_ALIASES` | Optional comma list of **previous** BFRR addresses so wallets still see old listings |
+
+`VITE_MARKETPLACE_ADDRESS` is unchanged unless you also redeploy `FeeRightsFixedSale`.
+
 ### Doppler SDK Test Launch
 
 Use the Doppler SDK scripts to create a Base Sepolia test launch and discover whether the resulting fee manager is compatible with the Bankr fee-rights escrow ABI.
