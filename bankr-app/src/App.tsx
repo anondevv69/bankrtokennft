@@ -59,7 +59,11 @@ import {
 } from "./lib/clankerDetail";
 import { clankerLockerV4Abi } from "./lib/clankerLockerV4Abi";
 import { CLANKER_V4_DEFAULT_LOCKER } from "./lib/clankerLockers";
-import { bankrEscrowAddressFromEnv, clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
+import {
+  bankrEscrowAddressFromEnv,
+  clankerEscrowAddressFromEnv,
+  clankerEscrowV4AddressFromEnv,
+} from "./lib/deployAddresses";
 import { resolveReceiptRedeemEscrow } from "./lib/receiptRedeemEscrow";
 import {
   formatListFlowError,
@@ -165,6 +169,7 @@ function receiptRowKey(collection: Address, tokenId: string): string {
 
 const ESCROW_ADDRESS: Address = bankrEscrowAddressFromEnv();
 const CLANKER_ESCROW_ADDRESS: Address | null = clankerEscrowAddressFromEnv();
+const CLANKER_ESCROW_V4_ADDRESS: Address | null = clankerEscrowV4AddressFromEnv();
 
 function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -1519,13 +1524,14 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
       tokenId,
       bankrEscrow: ESCROW_ADDRESS,
       clankerEscrow: CLANKER_ESCROW_ADDRESS,
+      clankerEscrowV4: CLANKER_ESCROW_V4_ADDRESS,
     }).then((addr) => {
       if (!cancelled) setRedeemEscrowResolved(addr);
     });
     return () => {
       cancelled = true;
     };
-  }, [publicClient, collection, tokenId, readOk]);
+  }, [publicClient, collection, tokenId, readOk, CLANKER_ESCROW_ADDRESS, CLANKER_ESCROW_V4_ADDRESS]);
 
   const canPull = Boolean(
     (typeof approvedSpender === "string" && isAddress(approvedSpender) &&
@@ -1671,8 +1677,8 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
           <span>Return to my wallet</span>
           <InfoTip label="What “Return to my wallet” does">
             <p>
-              Sends the NFT from escrow back to your wallet. You keep the token; it is no longer held for
-              this marketplace flow. Use this if you do not want an active listing.
+              Calls the correct fee-rights escrow’s <strong>redeemRights</strong>: it <strong>burns this receipt NFT</strong> and moves Bankr or Clanker fee-admin / recipient roles back to your wallet.
+              This is not the same as <strong>Cancel sale</strong> on the marketplace (that only unlists the NFT here). If this button fails, ensure <span className="mono">VITE_CLANKER_V4_ESCROW_ADDRESS</span> is set when the receipt came from Clanker v4.
             </p>
           </InfoTip>
         </div>
@@ -2636,7 +2642,7 @@ export default function App() {
                       <strong>2</strong> Open <strong>List</strong> on an NFT to set price; your wallet may approve the marketplace, then confirm the listing.
                     </p>
                     <p>
-                      <strong>3</strong> Active offers appear under <strong>Your listings</strong>. <strong>Return to my wallet</strong> moves the NFT out of escrow without listing it for sale.
+                      <strong>3</strong> Active offers appear under <strong>Your listings</strong>. <strong>Return to my wallet</strong> redeems fee rights (burns the receipt NFT on-chain); use <strong>Cancel sale</strong> first if this NFT is listed on the marketplace.
                     </p>
                   </InfoTip>
                 </p>
@@ -2673,8 +2679,7 @@ export default function App() {
                     </button>
                   </div>
                   <p className="muted one-liner">
-                    Bankr: list when a <strong>pool id</strong> is present. Clanker: list when we have a <strong>pool contract</strong> (API auto-fill or paste below) — locker defaults via{" "}
-                    <span className="mono">VITE_CLANKER_DEFAULT_LOCKER</span>.
+                    Bankr: list when a <strong>pool id</strong> is present. Clanker: list when we have a <strong>pool contract</strong> (filled automatically when possible, or paste under the row).
                   </p>
                   {idsForWatch.length > 0 && !bfrrDedupeReady && (
                     <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
@@ -2974,7 +2979,7 @@ export default function App() {
                       <InfoTip label="About these NFTs">
                         <p>
                           Each item is a Token Marketplace receipt NFT on Base. This list is NFTs you hold that are not listed on this
-                          site yet. <strong>List</strong> sets price (approve + list when needed). <strong>Return to my wallet</strong> moves the token from escrow back to your wallet without a sale listing.
+                          site yet. <strong>List</strong> sets price (approve + list when needed). <strong>Return to my wallet</strong> calls escrow <strong>redeemRights</strong>: it burns the receipt and restores fee rights to your wallet — not the same as canceling a marketplace listing.
                         </p>
                       </InfoTip>
                     </h2>
@@ -3154,6 +3159,7 @@ export default function App() {
                                   tokenId: BigInt(r.tokenId),
                                   bankrEscrow: ESCROW_ADDRESS,
                                   clankerEscrow: CLANKER_ESCROW_ADDRESS,
+                                  clankerEscrowV4: CLANKER_ESCROW_V4_ADDRESS,
                                 });
                                 await writeContractAsync({
                                   address: redeemEscrow,

@@ -65,6 +65,13 @@ export const clankerEscrowV4Abi = [
   },
   {
     type: "function",
+    name: "lockerForKey",
+    stateMutability: "view",
+    inputs: [{ name: "key", type: "bytes32" }],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
     name: "keyFor",
     stateMutability: "pure",
     inputs: [
