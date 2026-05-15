@@ -37,6 +37,7 @@ import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
 import {
   formatBankrPoolLabels,
+  normalizeLaunchedTicker,
   normalizePoolId,
   rowPoolIdHex,
   launchRowLabel,
@@ -49,6 +50,7 @@ import {
   readNftOwner,
   waitForMarketplaceApproval,
 } from "./listingFlow";
+import { bfrrReceiptPreviewDataUri } from "./bfrrPreviewSvg";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -155,6 +157,13 @@ function shortAddr(addr: string) {
 }
 
 /** Shorten huge ERC-721 `tokenId` integers for UI (full value stays in `title`). */
+function shortPoolId(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw);
+  if (s.length < 13) return s;
+  return s.slice(0, 6) + "…" + s.slice(-4);
+}
+
 function shortTokenIdDisplay(id: bigint): string {
   const s = id.toString();
   if (s.length <= 10) return s;
@@ -796,7 +805,11 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
   });
 
   const meta = useResolvedTokenMetadata(rawUri, tid !== null);
-  const imgSrc = meta.image ?? null;
+
+  const poolIdShort = useMemo(() => {
+    if (!position?.poolId) return null;
+    return shortPoolId(position.poolId);
+  }, [position]);
 
   const t0addr = useMemo(() => {
     if (!position || typeof position.token0 !== "string") return undefined;
@@ -856,7 +869,44 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     [t0addr, t1addr, symbol0, symbol1, name0, name1],
   );
 
-  const launchedSymbol = poolLabelsCard?.tokenName || poolLabelsCard?.ticker?.split(" / ").pop() || null;
+  const launchedSymbol = poolLabelsCard?.ticker || poolLabelsCard?.tokenName || null;
+
+  const bfrrPreviewUri = useMemo(() => {
+    const ticker =
+      poolLabelsCard?.ticker ||
+      normalizeLaunchedTicker(meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : null);
+    if (!ticker) return null;
+    const serialStr = serial !== undefined ? String(serial) : id;
+    const factory =
+      position && typeof position.factoryName === "string" ? position.factoryName.trim() : null;
+    let seller: string | null = null;
+    let feeMgr: string | null = null;
+    if (position && typeof position.seller === "string" && isAddress(position.seller, { strict: false })) {
+      try {
+        seller = shortAddr(getAddress(position.seller));
+      } catch {
+        seller = null;
+      }
+    }
+    if (position && typeof position.feeManager === "string" && isAddress(position.feeManager, { strict: false })) {
+      try {
+        feeMgr = shortAddr(getAddress(position.feeManager));
+      } catch {
+        feeMgr = null;
+      }
+    }
+    return bfrrReceiptPreviewDataUri({
+      serial: serialStr,
+      ticker,
+      tokenName: poolLabelsCard?.tokenName || ticker,
+      factory,
+      poolId: poolIdShort,
+      seller,
+      feeManager: feeMgr,
+    });
+  }, [poolLabelsCard, meta.pairTrait, serial, id, position, poolIdShort]);
+
+  const imgSrc = bfrrPreviewUri ?? meta.image ?? null;
 
   const factoryName =
     position && typeof position.factoryName === "string" && position.factoryName.trim()
@@ -872,7 +922,8 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
 
   const tickerLine =
     poolLabelsCard?.ticker ||
-    (meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : pairLabel);
+    normalizeLaunchedTicker(meta.pairTrait?.trim() ? normalizeDisplayText(meta.pairTrait.trim()) : null) ||
+    pairLabel;
 
   const serialLabel = serial !== undefined ? String(serial) : null;
   const headline = launchedSymbol
@@ -1150,7 +1201,9 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   );
 
   const tickerDisplay =
-    poolLabels?.ticker || meta.pairTrait?.trim() || (receiptReadsEnabled ? "—" : null);
+    poolLabels?.ticker ||
+    normalizeLaunchedTicker(meta.pairTrait?.trim()) ||
+    (receiptReadsEnabled ? "—" : null);
 
   const tokenNameDisplay =
     poolLabels?.tokenName ||
@@ -1174,42 +1227,68 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   const sellerAddr = isAddress(li.seller) ? getAddress(li.seller) : li.seller;
   const sellerScan = isAddress(li.seller) ? `https://basescan.org/address/${getAddress(li.seller)}` : undefined;
 
-  const [imgBroken, setImgBroken] = useState(false);
   const [bankrImgBroken, setBankrImgBroken] = useState(false);
   useEffect(() => {
-    setImgBroken(false);
     setBankrImgBroken(false);
-  }, [li.collection, li.tokenId, rawUri, chainImg, bankrImg]);
+  }, [li.collection, li.tokenId, rawUri, bankrImg, tickerDisplay, tokenNameDisplay]);
 
   const receiptIdLabel =
     serial !== undefined ? `#${String(serial)}` : `#${shortTokenIdDisplay(li.tokenId)}`;
 
-  const rasterChain = chainImg && !imgBroken ? chainImg : null;
+  const bfrrPreviewUri = useMemo(() => {
+    if (!tickerDisplay) return null;
+    const serialStr = serial !== undefined ? String(serial) : receiptIdLabel.replace(/^#/, "");
+    const factory =
+      position && typeof position.factoryName === "string" ? position.factoryName.trim() : null;
+    let feeMgr: string | null = null;
+    if (position && typeof position.feeManager === "string" && isAddress(position.feeManager, { strict: false })) {
+      try {
+        feeMgr = shortAddr(getAddress(position.feeManager));
+      } catch {
+        feeMgr = null;
+      }
+    }
+    return bfrrReceiptPreviewDataUri({
+      serial: serialStr,
+      ticker: tickerDisplay,
+      tokenName: tokenNameDisplay || tickerDisplay,
+      factory,
+      poolId: poolIdLc ? shortPoolId(poolIdLc) : null,
+      seller: sellerScan ? shortAddr(sellerAddr) : null,
+      feeManager: feeMgr,
+    });
+  }, [
+    tickerDisplay,
+    tokenNameDisplay,
+    serial,
+    receiptIdLabel,
+    position,
+    poolIdLc,
+    sellerScan,
+    sellerAddr,
+  ]);
+
   const rasterBankr = bankrImg && !bankrImgBroken ? bankrImg : null;
-  const rasterSrc = rasterChain ?? rasterBankr;
+  const displayImg = bfrrPreviewUri ?? rasterBankr;
 
   const synthDataUri = useMemo(() => {
-    const hasRaster = Boolean(rasterSrc);
-    if (hasRaster) return null;
+    if (displayImg) return null;
     const l1 = tickerDisplay || "Fee rights";
     const l2 = launchedContract ? shortAddr(launchedContract) : receiptIdLabel;
     if (!receiptReadsEnabled && !tickerDisplay) return null;
     return listingCardPlaceholderSvg(String(l1), String(l2));
-  }, [rasterSrc, tickerDisplay, launchedContract, receiptIdLabel, receiptReadsEnabled]);
+  }, [displayImg, tickerDisplay, launchedContract, receiptIdLabel, receiptReadsEnabled]);
 
   return (
     <div className="listing-card">
-      {rasterSrc ? (
+      {displayImg ? (
         <img
           className="listing-card__img"
-          src={rasterSrc}
+          src={displayImg}
           alt={cardAlt}
           loading="lazy"
           decoding="async"
-          onError={() => {
-            if (chainImg && !imgBroken) setImgBroken(true);
-            else setBankrImgBroken(true);
-          }}
+          onError={() => setBankrImgBroken(true)}
         />
       ) : synthDataUri ? (
         <img

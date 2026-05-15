@@ -63,14 +63,30 @@ function isWethHumanLabel(s: string | null | undefined): boolean {
 }
 
 export type BankrPoolLabels = {
-  /** Always `WETH / {launched}` when the pool is WETH + launch token. */
+  /** Launched token symbol only (no WETH prefix). */
   ticker: string;
-  /** Launched token only — never WETH / “Wrapped Ether”. */
+  /** Launched token name when available — never “Wrapped Ether”. */
   tokenName: string | null;
   launched: Address;
 };
 
-/** Consistent pool labels for listings and BFRR cards (WETH first, then launch ticker/name). */
+/** Strip `WETH / …` (or `… / WETH`) down to the launched leg for display/search. */
+export function normalizeLaunchedTicker(raw: string | null | undefined): string | null {
+  if (!raw?.trim()) return null;
+  const t = raw.trim();
+  const sep = " / ";
+  const i = t.indexOf(sep);
+  if (i >= 0) {
+    const left = t.slice(0, i).trim();
+    const right = t.slice(i + sep.length).trim();
+    if (isWethHumanLabel(left)) return right || null;
+    if (isWethHumanLabel(right)) return left || null;
+    return t;
+  }
+  return isWethHumanLabel(t) ? null : t;
+}
+
+/** Pool labels for listings and BFRR cards (launched ticker/name only). */
 export function formatBankrPoolLabels(
   token0: Address | undefined,
   token1: Address | undefined,
@@ -93,7 +109,7 @@ export function formatBankrPoolLabels(
     const launchedSym = s1 || shortAddr(launched);
     const launchedName = n1 && !isWethHumanLabel(n1) ? n1 : null;
     return {
-      ticker: `WETH / ${launchedSym}`,
+      ticker: launchedSym,
       tokenName: launchedName || s1,
       launched,
     };
@@ -103,14 +119,17 @@ export function formatBankrPoolLabels(
     const launchedSym = s0 || shortAddr(launched);
     const launchedName = n0 && !isWethHumanLabel(n0) ? n0 : null;
     return {
-      ticker: `WETH / ${launchedSym}`,
+      ticker: launchedSym,
       tokenName: launchedName || s0,
       launched,
     };
   }
 
   const ticker =
-    s0 && s1 ? `${s0} / ${s1}` : `${shortAddr(getAddress(token0))} / ${shortAddr(getAddress(token1))}`;
+    s0 && s1
+      ? normalizeLaunchedTicker(`${s0} / ${s1}`) ??
+        `${s0} / ${s1}`
+      : `${shortAddr(getAddress(token0))} / ${shortAddr(getAddress(token1))}`;
   const tokenName =
     (n0 && !isWethHumanLabel(n0) ? n0 : null) ||
     (n1 && !isWethHumanLabel(n1) ? n1 : null) ||

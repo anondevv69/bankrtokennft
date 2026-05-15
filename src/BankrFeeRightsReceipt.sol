@@ -14,6 +14,8 @@ import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/exten
 ///      lets future factories (Bankr, Clanker, …) brand their receipts without
 ///      redeploying this contract.
 contract BankrFeeRightsReceipt is ERC721 {
+    address private constant WETH_BASE = 0x4200000000000000000000000000000000000006;
+
     /// @notice Metadata stored per minted receipt.
     struct Position {
         address feeManager;
@@ -80,10 +82,12 @@ contract BankrFeeRightsReceipt is ERC721 {
 
         string memory sym0 = _trySymbol(pos.token0);
         string memory sym1 = _trySymbol(pos.token1);
+        string memory ticker = _launchedTicker(pos, sym0, sym1);
+        string memory tokenName = _launchedTokenName(pos, sym0, sym1);
         string memory fact = bytes(pos.factoryName).length > 0 ? pos.factoryName : "Unknown";
         string memory sSerial = Strings.toString(serial);
 
-        string memory svg = _buildSVG(pos, sSerial, sym0, sym1, fact);
+        string memory svg = _buildSVG(pos, sSerial, ticker, tokenName, fact);
 
         string memory json = string.concat(
             '{"name":"Bankr Fee Rights #',
@@ -92,10 +96,10 @@ contract BankrFeeRightsReceipt is ERC721 {
             '"description":"',
             _safe(fact),
             " fee rights on Base: ",
-            _safe(sym0),
-            " / ",
-            _safe(sym1),
-            ". Pool ",
+            _safe(ticker),
+            " (",
+            _safe(tokenName),
+            "). Pool ",
             _shortB32(pos.poolId),
             ". Seller ",
             _shortAddr(pos.seller),
@@ -110,10 +114,14 @@ contract BankrFeeRightsReceipt is ERC721 {
             '{"trait_type":"Factory","value":"',
             _safe(fact),
             '"},',
+            '{"trait_type":"Ticker","value":"',
+            _safe(ticker),
+            '"},',
+            '{"trait_type":"Token Name","value":"',
+            _safe(tokenName),
+            '"},',
             '{"trait_type":"Pair","value":"',
-            _safe(sym0),
-            "/",
-            _safe(sym1),
+            _safe(ticker),
             '"},',
             '{"trait_type":"Original Seller","value":"',
             Strings.toHexString(pos.seller),
@@ -132,16 +140,16 @@ contract BankrFeeRightsReceipt is ERC721 {
     function _buildSVG(
         Position memory pos,
         string memory sSerial,
-        string memory sym0,
-        string memory sym1,
+        string memory ticker,
+        string memory tokenName,
         string memory fact
     ) private pure returns (string memory) {
         return string.concat(
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300">',
             _svgDefs(),
             _svgFrame(fact),
-            _svgHeader(sSerial, sym0, sym1),
-            _svgBody(pos, sSerial),
+            _svgHeader(sSerial, ticker, tokenName),
+            _svgBody(pos, sSerial, ticker, tokenName),
             "</svg>"
         );
     }
@@ -176,31 +184,55 @@ contract BankrFeeRightsReceipt is ERC721 {
         );
     }
 
-    function _svgHeader(string memory sSerial, string memory sym0, string memory sym1)
+    function _svgHeader(string memory sSerial, string memory ticker, string memory tokenName)
         private
         pure
         returns (string memory)
     {
+        bool showName = keccak256(bytes(_safe(ticker))) != keccak256(bytes(_safe(tokenName)));
+        string memory boxH = showName ? "58" : "48";
+        string memory lineY = showName ? "200" : "194";
         return string.concat(
             '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">BANKR FEE RIGHTS</text>',
             '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">BFRR #',
             sSerial,
             "</text>",
-            '<rect x="32" y="130" width="356" height="48" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>',
-            '<text x="210" y="160" font-family="ui-monospace,monospace" font-size="18" fill="#fdba74" font-weight="700" text-anchor="middle">',
-            _safe(sym0),
-            " / ",
-            _safe(sym1),
+            '<rect x="32" y="130" width="356" height="',
+            boxH,
+            '" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>',
+            '<text x="48" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TICKER</text>',
+            '<text x="48" y="172" font-family="ui-monospace,monospace" font-size="20" fill="#fdba74" font-weight="700">',
+            _safe(ticker),
             "</text>",
-            '<line x1="32" y1="194" x2="388" y2="194" stroke="#27272f" stroke-width="1"/>'
+            showName
+                ? string.concat(
+                    '<text x="210" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TOKEN NAME</text>',
+                    '<text x="210" y="172" font-family="ui-monospace,monospace" font-size="14" fill="#e4e4e7" font-weight="600">',
+                    _safe(tokenName),
+                    "</text>"
+                )
+                : "",
+            '<line x1="32" y1="',
+            lineY,
+            '" x2="388" y2="',
+            lineY,
+            '" stroke="#27272f" stroke-width="1"/>'
         );
     }
 
-    function _svgBody(Position memory pos, string memory sSerial) private pure returns (string memory) {
+    function _svgBody(Position memory pos, string memory sSerial, string memory ticker, string memory tokenName)
+        private
+        pure
+        returns (string memory)
+    {
+        bool compact = keccak256(bytes(_safe(ticker))) == keccak256(bytes(_safe(tokenName)));
+        string memory yPool = compact ? "210" : "218";
+        string memory ySell = compact ? "234" : "242";
+        string memory yFee = compact ? "258" : "266";
         return string.concat(
-            _svgRow("210", "POOL ID", _shortB32(pos.poolId)),
-            _svgRow("234", "SELLER", _shortAddr(pos.seller)),
-            _svgRow("258", "FEE MGR", _shortAddr(pos.feeManager)),
+            _svgRow(yPool, "POOL ID", _shortB32(pos.poolId)),
+            _svgRow(ySell, "SELLER", _shortAddr(pos.seller)),
+            _svgRow(yFee, "FEE MGR", _shortAddr(pos.feeManager)),
             '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
             '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Bankr Fee Rights Receipt - Base mainnet</text>',
             '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
@@ -226,6 +258,43 @@ contract BankrFeeRightsReceipt is ERC721 {
             value,
             "</text>"
         );
+    }
+
+    // ── Launched-token labels (WETH leg hidden) ───────────────────────────────
+
+    function _launchedTicker(Position memory pos, string memory sym0, string memory sym1)
+        private
+        pure
+        returns (string memory)
+    {
+        if (pos.token0 == WETH_BASE) return sym1;
+        if (pos.token1 == WETH_BASE) return sym0;
+        return sym0;
+    }
+
+    function _launchedTokenName(Position memory pos, string memory sym0, string memory sym1)
+        private
+        view
+        returns (string memory)
+    {
+        if (pos.token0 == WETH_BASE) return _launchedName(pos.token1, sym1);
+        if (pos.token1 == WETH_BASE) return _launchedName(pos.token0, sym0);
+        return sym1;
+    }
+
+    function _launchedName(address token, string memory fallbackSym) private view returns (string memory) {
+        try IERC20Metadata(token).name() returns (string memory n) {
+            if (bytes(n).length == 0) return fallbackSym;
+            if (_isWethLabel(n)) return fallbackSym;
+            return n;
+        } catch {
+            return fallbackSym;
+        }
+    }
+
+    function _isWethLabel(string memory s) private pure returns (bool) {
+        return keccak256(bytes(_toUpper(s))) == keccak256(bytes("WETH"))
+            || keccak256(bytes(_toUpper(s))) == keccak256(bytes("WRAPPED ETHER"));
     }
 
     // ── String utilities ─────────────────────────────────────────────────────
