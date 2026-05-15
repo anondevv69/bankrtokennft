@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
@@ -414,7 +414,10 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   wrongNetwork: boolean; isConnected: boolean; onDone: () => void;
 }) {
   const [price, setPrice] = useState("0.01");
+  const [listStep, setListStep] = useState<null | "approve" | "list">(null);
+  const listLock = useRef(false);
   const { writeContractAsync, isPending } = useWriteContract();
+  const publicClient = usePublicClient();
 
   const tokenId = useMemo(() => { try { return BigInt(tokenIdStr); } catch { return null; } }, [tokenIdStr]);
   const enabled = !wrongNetwork && !txDisabled && tokenId !== null;
@@ -447,6 +450,45 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 
   const run = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* surfaced by writeError */ } };
 
+  const listBusy = listStep !== null || isPending;
+  const listLabel =
+    listStep === "approve" ? (
+      <><span className="spinner" /> Approve in wallet…</>
+    ) : listStep === "list" ? (
+      <><span className="spinner" /> Confirm listing…</>
+    ) : (
+      "List"
+    );
+
+  const onList = () => run(async () => {
+    if (!priceOk || tokenId === null || txDisabled || !publicClient) return;
+    if (listLock.current) return;
+    listLock.current = true;
+    try {
+      if (!canPull) {
+        setListStep("approve");
+        const approveHash = await writeContractAsync({
+          address: collection, abi: erc721Abi, functionName: "approve",
+          args: [marketplace, tokenId], chainId: MVP_CHAIN_ID,
+        });
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        setListStep("list");
+      } else {
+        setListStep("list");
+      }
+      await writeContractAsync({
+        address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "list",
+        args: [collection, tokenId, parseEther(priceNorm)], chainId: MVP_CHAIN_ID,
+      });
+      onDone();
+    } catch {
+      /* wallet / rpc errors */
+    } finally {
+      listLock.current = false;
+      setListStep(null);
+    }
+  });
+
   return (
     <div className="sell-panel">
       <div className="sell-panel__title">
@@ -464,43 +506,28 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
         </div>
       </div>
 
-      <div className="sell-actions">
-        {canPull ? (
-          <span className="approved-tag">Ready to list</span>
-        ) : (
-          <button type="button" className="btn btn-ghost"
-            disabled={txDisabled || tokenId === null}
-            onClick={() => run(async () => {
-              await writeContractAsync({
-                address: collection, abi: erc721Abi, functionName: "approve",
-                args: [marketplace, tokenId!], chainId: MVP_CHAIN_ID,
-              });
-            })}>
-            {isPending ? <><span className="spinner" />Wallet…</> : "Allow marketplace"}
-          </button>
-        )}
-        <button type="button" className="btn btn-primary"
-          disabled={txDisabled || !canPull || !priceOk || tokenId === null}
-          onClick={() => run(async () => {
-            await writeContractAsync({
-              address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "list",
-              args: [collection, tokenId!, parseEther(priceNorm)], chainId: MVP_CHAIN_ID,
-            });
-            onDone();
-          })}>
-          {isPending ? <><span className="spinner" />Wallet…</> : "List"}
+      <div className="sell-actions sell-actions--single">
+        <button type="button" className="btn btn-primary btn-full"
+          disabled={txDisabled || !priceOk || tokenId === null || listStep !== null || isPending}
+          onClick={onList}>
+          {listLabel}
         </button>
+        {!canPull && !listBusy && (
+          <p className="muted sell-actions__hint">
+            The first time you list this receipt, your wallet will ask you to approve the marketplace, then to confirm the listing. Both steps run from this button.
+          </p>
+        )}
       </div>
 
       <div className="redeem-row">
         <div className="redeem-label">
-          <span>Leave escrow</span>
+          <span>Return to wallet</span>
           <strong className="muted" style={{ fontWeight: 500, fontSize: "0.78rem" }}>
-            Returns creator fees to you and removes the receipt from sale.
+            Pull this receipt out of Bankr escrow so it stays in your wallet (no active marketplace listing).
           </strong>
         </div>
         <button type="button" className="btn btn-ghost btn-sm"
-          disabled={txDisabled || !isBfrrOwner || tokenId === null}
+          disabled={txDisabled || !isBfrrOwner || tokenId === null || listBusy}
           title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
           onClick={() => run(async () => {
             await writeContractAsync({
@@ -508,7 +535,11 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
               args: [tokenId!], chainId: MVP_CHAIN_ID,
             });
           })}>
-          {isPending ? <><span className="spinner" />…</> : "Cancel escrow"}
+          {isPending && listStep === null ? (
+            <><span className="spinner" /> Wallet…</>
+          ) : (
+            "Return to wallet"
+          )}
         </button>
       </div>
     </div>
@@ -909,7 +940,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="muted one-liner">
-                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Cancel escrow</strong> to pull fee rights back from escrow.
+                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Return to wallet</strong> to pull the receipt out of Bankr escrow.
                   </p>
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
@@ -999,7 +1030,7 @@ export default function App() {
                               void refetchListings();
                             })}
                           >
-                            Cancel escrow
+                            Return to wallet
                           </button>
                         </div>
                         {selectedId === id && (

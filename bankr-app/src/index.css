@@ -662,6 +662,19 @@ input::placeholder { color: var(--muted); }
   flex-wrap: wrap;
 }
 
+.sell-actions--single {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.sell-actions__hint {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  max-width: 28rem;
+}
+
 .approved-tag {
   display: inline-flex;
   align-items: center;
