@@ -81,7 +81,7 @@ contract ClankerEscrowV4Test is Test {
     MockClankerLockerV4 private locker;
 
     function setUp() public {
-        tmpr = new BankrFeeRightsReceipt(ADMIN);
+        tmpr = new BankrFeeRightsReceipt(ADMIN, ADMIN);
         escrow = new ClankerEscrowV4(ADMIN, tmpr);
 
         vm.prank(ADMIN);

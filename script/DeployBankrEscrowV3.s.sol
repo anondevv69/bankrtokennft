@@ -39,6 +39,7 @@ contract DeployBankrEscrowV3 is Script {
         address finalOwner = configuredOwner == address(0) ? deployer : configuredOwner;
         string memory feeManagersCsv = vm.envOr("INITIAL_FEE_MANAGERS", string(""));
         string memory factoryName = vm.envOr("FACTORY_NAME", string("Bankr"));
+        address royaltyReceiver = vm.envOr("ROYALTY_RECEIVER", deployer);
 
         console2.log("Deploying BankrEscrowV3");
         console2.log("  Deployer (broadcast): ", deployer);
@@ -48,7 +49,7 @@ contract DeployBankrEscrowV3 is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy shared receipt first, then escrow, then authorize escrow.
-        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(deployer);
+        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(deployer, royaltyReceiver);
         escrow = new BankrEscrowV3(deployer, tmpr);
         tmpr.setEscrowAuthorized(address(escrow), true);
 

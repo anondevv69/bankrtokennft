@@ -46,17 +46,19 @@ contract DeployTokenMarketplace is Script {
 
         string memory bankrCsv = vm.envOr("BANKR_FEE_MANAGERS", string(""));
         string memory clankerCsv = vm.envOr("CLANKER_LOCKERS", string(""));
+        address royaltyReceiver = vm.envOr("ROYALTY_RECEIVER", deployer);
 
         console2.log("=== Token Marketplace deployment ===");
         console2.log("Deployer:          ", deployer);
         console2.log("Final owner:       ", finalOwner);
+        console2.log("Royalty receiver:  ", royaltyReceiver);
         console2.log("Bankr fee managers:", bankrCsv);
         console2.log("Clanker lockers:   ", clankerCsv);
 
         vm.startBroadcast(deployerPrivateKey);
 
         // 1. Deploy shared TMPR receipt collection (deployer is initial owner so we can authorize escrows)
-        tmpr = new BankrFeeRightsReceipt(deployer);
+        tmpr = new BankrFeeRightsReceipt(deployer, royaltyReceiver);
         console2.log("BankrFeeRightsReceipt (TMPR):", address(tmpr));
 
         // 2. Deploy Bankr escrow

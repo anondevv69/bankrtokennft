@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import {ERC2981} from "openzeppelin-contracts/contracts/token/common/ERC2981.sol";
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
 import {Strings} from "openzeppelin-contracts/contracts/utils/Strings.sol";
@@ -13,7 +14,7 @@ import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/exten
 ///         Serial # in metadata is per mint. `factoryName` brands the launch venue.
 /// @dev The owner may authorize / deauthorize escrow contracts.
 ///      ERC721 collection name/symbol are marketplace-branded (not Bankr-specific).
-contract BankrFeeRightsReceipt is ERC721, Ownable {
+contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
     address private constant WETH_BASE = 0x4200000000000000000000000000000000000006;
 
     /// @notice Metadata stored per minted receipt.
@@ -46,9 +47,34 @@ contract BankrFeeRightsReceipt is ERC721, Ownable {
         _;
     }
 
-    /// @param initialOwner Address that can authorize / deauthorize escrows.
-    constructor(address initialOwner) ERC721("Token Marketplace", "TMPR") Ownable(initialOwner) {
+    /// @param initialOwner  Address that can authorize / deauthorize escrows and update royalty.
+    /// @param royaltyReceiver  Wallet that receives the 2 % EIP-2981 royalty on secondary sales
+    ///                         (e.g. vault). Can be updated later via `setRoyalty`.
+    constructor(address initialOwner, address royaltyReceiver)
+        ERC721("Token Marketplace", "TMPR")
+        Ownable(initialOwner)
+    {
         if (initialOwner == address(0)) revert ZeroAddress();
+        if (royaltyReceiver == address(0)) revert ZeroAddress();
+        _setDefaultRoyalty(royaltyReceiver, 200); // 200 bps = 2 %
+    }
+
+    /// @notice Update the royalty receiver and/or fee fraction.
+    /// @param receiver  New royalty wallet.
+    /// @param feeBps    Royalty in basis points (e.g. 200 = 2 %). Max 10000.
+    function setRoyalty(address receiver, uint96 feeBps) external onlyOwner {
+        if (receiver == address(0)) revert ZeroAddress();
+        _setDefaultRoyalty(receiver, feeBps);
+    }
+
+    /// @inheritdoc ERC721
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721, ERC2981)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
     }
 
     /// @notice Authorize or deauthorize an escrow contract to mint / burn receipts.

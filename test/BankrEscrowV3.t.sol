@@ -27,7 +27,7 @@ contract BankrEscrowV3Test is Test {
         feesManager = new MockBankrFeesManagerV2(token0, token1);
 
         // Deploy shared receipt, then escrow, then authorize escrow on receipt.
-        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(ADMIN);
+        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(ADMIN, ADMIN);
         escrow = new BankrEscrowV3(ADMIN, tmpr);
         vm.prank(ADMIN);
         tmpr.setEscrowAuthorized(address(escrow), true);
