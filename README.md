@@ -154,7 +154,7 @@ token1 = 0x543f82143bAfd178C335Ce06745A3fE9e61Bcbc3
 
 See `NFT_RECEIPT_DESIGN.md` for architecture notes. Implemented contracts:
 
-- `src/BankrFeeRightsReceipt.sol` — ERC721 **`Creator Fee Rights` (`CFR`)**, mint/burn only by escrow.
+- `src/BankrFeeRightsReceipt.sol` — ERC721 **`Token Marketplace` (`TMPR`)**, mint/burn only by escrow.
 - `src/BankrEscrowV3.sol` — same fee flow as V2; `finalizeDeposit` mints the receipt; `redeemRights(tokenId)` gives Bankr rights to the NFT holder; seller `cancelRights` only while they still hold the NFT; `releaseRights` remains admin-only for emergencies.
 
 See `MVP_ROADMAP.md` for how escrow + receipt + fixed sale fit together.
@@ -192,7 +192,9 @@ Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor
 
 ### Deploy `BankrEscrowV3` on Base mainnet (production redeploy)
 
-`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt NFT (`CFR`)**. Redeploy when you want new on-chain SVG/metadata (e.g. ticker/token-name art); **existing** receipts on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
+`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt NFT (`TMPR` — Token Marketplace)**. Redeploy when you want new on-chain SVG/metadata (e.g. venue labels, art); **existing** receipts on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
+
+To support **both Bankr and Clanker** fee routes on one escrow, set `INITIAL_FEE_MANAGERS` to **both** fee-manager contract addresses on Base (comma-separated). Default `FACTORY_NAME` applies to all at deploy; call **`setFactoryName(clankerFeeManager, "Clanker")`** as escrow owner so new receipts show **Clanker** in metadata (Bankr managers stay **`FACTORY_NAME`** e.g. `"Bankr"`).
 
 **1. Pick fee managers**
 
@@ -251,7 +253,7 @@ Set or update **before** `npm run build`:
 | Variable | Set to |
 |----------|--------|
 | `VITE_ESCROW_ADDRESS` | New escrow address |
-| `VITE_DEFAULT_RECEIPT_COLLECTION` | **New** `BankrFeeRightsReceipt` (from `escrow.receipt()` on BaseScan) |
+| `VITE_DEFAULT_RECEIPT_COLLECTION` | **New** receipt contract (`Token Marketplace` / symbol **TMPR** on explorers — from `escrow.receipt()` on BaseScan) |
 | `VITE_RECEIPT_COLLECTION_ALIASES` | Optional comma list of **previous** receipt NFT contracts so wallets still see old listings |
 
 `VITE_MARKETPLACE_ADDRESS` is unchanged unless you also redeploy `FeeRightsFixedSale`.

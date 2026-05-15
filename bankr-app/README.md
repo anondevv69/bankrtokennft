@@ -1,6 +1,6 @@
-# Bankr app (web)
+# Token Marketplace (web)
 
-Minimal **Base mainnet** UI for `FeeRightsFixedSale`: **sell at a price or cancel**, **offers** (send, pull back, accept), **buy** a listing — for real Bankr receipt NFTs. Listing uses one **List** control: it sends **`approve(marketplace, tokenId)`** when needed (per-token approval, softer wallet warnings than `setApprovalForAll`), waits for confirmation, then calls **`list`**. Hardcoded to **Base (chain id 8453)** only; wrong network shows a gate and blocks txs from this UI.
+Minimal **Base mainnet** UI for `FeeRightsFixedSale`: **sell at a price or cancel**, **offers** (send, pull back, accept), **buy** a listing — for **Token Marketplace** receipt NFTs (solidity `BankrFeeRightsReceipt`, symbol **TMPR**). Listing uses one **List** control: it sends **`approve(marketplace, tokenId)`** when needed (per-token approval, softer wallet warnings than `setApprovalForAll`), waits for confirmation, then calls **`list`**. Hardcoded to **Base (chain id 8453)** only; wrong network shows a gate and blocks txs from this UI.
 
 ## Node version
 

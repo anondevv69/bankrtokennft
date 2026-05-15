@@ -29,7 +29,7 @@ const walletConnectConnector = walletConnectConfigured
       projectId: wcProjectIdRaw,
       metadata: {
         name: "Token Marketplace",
-        description: "Creator fee rights — Base",
+        description: "Token Marketplace — Base",
         url: typeof window !== "undefined" ? window.location.origin : "https://localhost",
         icons: [],
       },

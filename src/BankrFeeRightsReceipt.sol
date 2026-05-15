@@ -10,6 +10,7 @@ import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/exten
 /// @notice ERC721 receipt minted when escrow finalizes custody of transferable creator fee rights.
 ///         Works with any fee-manager contract that matches `IBankrFees`. Serial # in metadata is per mint.
 /// @dev Only the escrow contract may mint or burn. `factoryName` brands the launch venue (Bankr, Clanker, …).
+///      ERC721 collection name/symbol are marketplace-branded (not Bankr-specific).
 contract BankrFeeRightsReceipt is ERC721 {
     address private constant WETH_BASE = 0x4200000000000000000000000000000000000006;
 
@@ -40,7 +41,7 @@ contract BankrFeeRightsReceipt is ERC721 {
         _;
     }
 
-    constructor(address escrow_) ERC721("Creator Fee Rights", "CFR") {
+    constructor(address escrow_) ERC721("Token Marketplace", "TMPR") {
         if (escrow_ == address(0)) revert ZeroAddress();
         escrow = escrow_;
     }
@@ -101,14 +102,14 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory svg
     ) private pure returns (string memory) {
         string memory head = string.concat(
-            '{"name":"Creator Fee Rights #',
+            '{"name":"Token Marketplace #',
             sSerial,
             " - ",
             _safe(fact),
             '",',
             '"description":"Launch factory: ',
             _safe(fact),
-            ". Creator fee rights on Base for ",
+            ". Token Marketplace fee receipt on Base for ",
             _safe(ticker),
             " (",
             _safe(tokenName),
@@ -209,8 +210,8 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory boxH = showName ? "58" : "48";
         string memory lineY = showName ? "200" : "194";
         return string.concat(
-            '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">CREATOR FEE RIGHTS</text>',
-            '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">CFR #',
+            '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">TOKEN MARKETPLACE</text>',
+            '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">TMPR #',
             sSerial,
             "</text>",
             '<rect x="32" y="130" width="356" height="',
@@ -248,7 +249,7 @@ contract BankrFeeRightsReceipt is ERC721 {
                 _svgRow("246", "SELLER", _shortAddr(pos.seller)),
                 _svgRow("264", "FEE MGR", _shortAddr(pos.feeManager)),
                 '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
-                '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Creator fee rights - Base mainnet</text>',
+                '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
                 '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
                 sSerial,
                 "</text>"
@@ -260,7 +261,7 @@ contract BankrFeeRightsReceipt is ERC721 {
             _svgRow("248", "SELLER", _shortAddr(pos.seller)),
             _svgRow("266", "FEE MGR", _shortAddr(pos.feeManager)),
             '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
-            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Creator fee rights - Base mainnet</text>',
+            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
             '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
             sSerial,
             "</text>"

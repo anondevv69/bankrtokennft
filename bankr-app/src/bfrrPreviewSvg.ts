@@ -61,8 +61,8 @@ export function bfrrReceiptPreviewDataUri(opts: BfrrPreviewOpts): string {
 <rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#fdba74" stroke-opacity="0.45"/>
 <text x="336" y="56" font-family="ui-monospace,monospace" font-size="8" fill="#a1a1aa" text-anchor="middle" font-weight="600" letter-spacing="0.06">LAUNCH</text>
 <text x="336" y="76" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">${factUpper}</text>
-<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">CREATOR FEE RIGHTS</text>
-<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">CFR #${serial}</text>
+<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">TOKEN MARKETPLACE</text>
+<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">TMPR #${serial}</text>
 <rect x="32" y="130" width="356" height="${showName ? 58 : 48}" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>
 <text x="48" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TICKER</text>
 <text x="48" y="172" font-family="ui-monospace,monospace" font-size="20" fill="#fdba74" font-weight="700">${ticker}</text>
