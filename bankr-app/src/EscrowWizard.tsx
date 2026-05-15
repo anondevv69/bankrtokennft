@@ -9,9 +9,10 @@ import { bankrFeesMinimalAbi } from "./lib/bankrFeesMinimalAbi";
 import { inferToken0Token1, rowLaunchedToken, launchRowLabel, rowPoolIdHex } from "./lib/escrowArgs";
 
 import { EscrowWizardClanker } from "./EscrowWizardClanker";
+import { EscrowWizardClankerV4 } from "./EscrowWizardClankerV4";
 import type { EscrowWizardProps } from "./escrowWizardTypes";
-import { rowClankerListingReady } from "./lib/clankerDetail";
-import { clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
+import { rowClankerListingReady, rowClankerLockerVersion } from "./lib/clankerDetail";
+import { clankerEscrowAddressFromEnv, clankerEscrowV4AddressFromEnv } from "./lib/deployAddresses";
 
 export type { EscrowWizardProps } from "./escrowWizardTypes";
 
@@ -554,13 +555,50 @@ function EscrowWizardBankr({ row, escrowAddress, userAddress, onClose, onDone }:
 
 export function EscrowWizard(props: EscrowWizardProps) {
   if (rowClankerListingReady(props.row)) {
+    const lockerVersion = rowClankerLockerVersion(props.row);
+
+    // ── Clanker v4 ──────────────────────────────────────────────────────────
+    if (lockerVersion === "v4") {
+      const ce4 = clankerEscrowV4AddressFromEnv();
+      if (!ce4) {
+        return (
+          <div className="settings-overlay" onClick={props.onClose}>
+            <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
+              <div className="settings-sheet__head">
+                <h3>List for sale (Clanker v4)</h3>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={props.onClose}>
+                  ✕
+                </button>
+              </div>
+              <p className="err">
+                Set <span className="mono">VITE_CLANKER_V4_ESCROW_ADDRESS</span> to your deployed{" "}
+                <span className="mono">ClankerEscrowV4</span> contract and redeploy.{" "}
+                Deploy with:{" "}
+                <span className="mono">forge script script/DeployAddClankerV4.s.sol</span>
+              </p>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <EscrowWizardClankerV4
+          row={props.row}
+          clankerEscrowV4Address={ce4}
+          userAddress={props.userAddress}
+          onClose={props.onClose}
+          onDone={props.onDone}
+        />
+      );
+    }
+
+    // ── Clanker v3.x ────────────────────────────────────────────────────────
     const ce = props.clankerEscrowAddress ?? clankerEscrowAddressFromEnv();
     if (!ce) {
       return (
         <div className="settings-overlay" onClick={props.onClose}>
           <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
             <div className="settings-sheet__head">
-              <h3>List for sale</h3>
+              <h3>List for sale (Clanker)</h3>
               <button type="button" className="btn btn-ghost btn-sm" onClick={props.onClose}>
                 ✕
               </button>

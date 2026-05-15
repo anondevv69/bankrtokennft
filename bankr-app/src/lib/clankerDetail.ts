@@ -1,6 +1,7 @@
 import { getAddress, isAddress, type Address } from "viem";
 import { rowLaunchedToken } from "./escrowArgs";
-import { clankerDefaultLockerFromEnv } from "./deployAddresses";
+import { clankerDefaultLockerFromEnv, clankerV4DefaultLockerFromEnv } from "./deployAddresses";
+import { clankerLockerVersion, isV4Locker, type ClankerLockerVersion } from "./clankerLockers";
 
 /** Shape returned by Clanker authenticated “token by address” (nested under `data`). */
 export type ClankerTokenDetail = {
@@ -72,9 +73,38 @@ export function mergeClankerManual(
 }
 
 /**
+ * Resolves the effective locker address for a Clanker row.
+ * Returns the row's explicit locker if set, otherwise the env default for the detected version.
+ */
+export function rowClankerEffectiveLocker(row: Record<string, unknown>): Address | null {
+  const locker = row.__clankerLocker;
+  if (typeof locker === "string" && isAddress(locker, { strict: false })) {
+    return getAddress(locker);
+  }
+  return clankerDefaultLockerFromEnv();
+}
+
+/**
+ * Returns the Clanker locker version for a row ("v3" | "v4" | null).
+ * Uses the locker registry; falls back to "v3" for unknown addresses so
+ * existing tokens continue to work.
+ */
+export function rowClankerLockerVersion(row: Record<string, unknown>): ClankerLockerVersion {
+  const locker = rowClankerEffectiveLocker(row);
+  if (!locker) return "v3";
+  // Check registry first, then check if the default v4 env locker is configured.
+  const fromRegistry = clankerLockerVersion(locker);
+  if (fromRegistry) return fromRegistry;
+  // Unknown locker: if the v4 env default is explicitly configured and matches, treat as v4.
+  const v4Default = clankerV4DefaultLockerFromEnv();
+  if (v4Default && getAddress(v4Default) === getAddress(locker)) return "v4";
+  return "v3";
+}
+
+/**
  * Whether **List** can open for a Clanker row.
- * Needs Uniswap V3 **pool contract** (`pool_address` from API or pasted manually).
- * Locker defaults from `VITE_CLANKER_DEFAULT_LOCKER` (Base v3.1 `LpLockerv2`) when unset on row.
+ * Needs Uniswap V3/V4 **pool contract** (`pool_address` from API or pasted manually).
+ * Locker defaults from env (`VITE_CLANKER_DEFAULT_LOCKER`) when unset on the row.
  */
 export function rowClankerListingReady(row: Record<string, unknown>): boolean {
   if (row.__launchVenue !== "Clanker") return false;
@@ -85,8 +115,12 @@ export function rowClankerListingReady(row: Record<string, unknown>): boolean {
   if (!poolOk) return false;
   const locker = row.__clankerLocker;
   if (typeof locker === "string" && isAddress(locker, { strict: false })) return true;
-  return Boolean(clankerDefaultLockerFromEnv());
+  // Fall back to env-configured default locker (v3 or v4).
+  return Boolean(clankerDefaultLockerFromEnv()) || Boolean(clankerV4DefaultLockerFromEnv());
 }
+
+// Re-export for convenience.
+export { isV4Locker, clankerLockerVersion };
 
 export async function fetchClankerTokenDetail(tokenAddress: Address): Promise<ClankerTokenDetail | null> {
   const res = await fetch(`/api/clanker-get-token?address=${encodeURIComponent(tokenAddress)}`);

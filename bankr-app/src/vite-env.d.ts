@@ -20,8 +20,12 @@ interface ImportMetaEnv {
   readonly VITE_BANKR_ESCROW_ADDRESS?: string;
   /** `ClankerEscrowV1` — required for listing Clanker tokens end-to-end. */
   readonly VITE_CLANKER_ESCROW_ADDRESS?: string;
-  /** Optional — Base `LpLockerv2` used when `CLANKER_API_KEY` does not supply locker (manual pool paste path). */
+  /** Optional — Base v3.x `LpLockerv2` used when `CLANKER_API_KEY` does not supply locker (manual pool paste path). Defaults to v3.1 `0x33e2E…`. */
   readonly VITE_CLANKER_DEFAULT_LOCKER?: string;
+  /** Optional — Override for the v4 default locker (`ClankerLpLockerFeeConversion`). Defaults to `0x63D2D…`. */
+  readonly VITE_CLANKER_V4_DEFAULT_LOCKER?: string;
+  /** `ClankerEscrowV4` — required for listing Clanker v4 tokens end-to-end. */
+  readonly VITE_CLANKER_V4_ESCROW_ADDRESS?: string;
 }
 
 interface ImportMeta {
