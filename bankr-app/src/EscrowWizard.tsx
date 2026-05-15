@@ -13,7 +13,7 @@ export type EscrowWizardProps = {
   escrowAddress: Address;
   userAddress: Address;
   onClose: () => void;
-  /** After successful finalize — parent should rescan BFRRs. */
+  /** After successful finalize — parent should rescan receipt NFTs. */
   onDone: () => void;
 };
 
@@ -161,7 +161,7 @@ function EscrowStepper({ step }: { step: 1 | 2 | 3 }) {
   const items: { n: 1 | 2 | 3; title: string; hint: string }[] = [
     { n: 1, title: "Prepare", hint: "Escrow contract records your pool" },
     { n: 2, title: "Transfer fees", hint: "Fee contract → beneficiary points at escrow" },
-    { n: 3, title: "Finalize", hint: "Escrow mints your fee-rights NFT (BFRR)" },
+    { n: 3, title: "Finalize", hint: "Escrow mints your fee-rights NFT" },
   ];
   return (
     <ol className="escrow-stepper" aria-label="Three steps on Base">

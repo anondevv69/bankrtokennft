@@ -154,7 +154,7 @@ token1 = 0x543f82143bAfd178C335Ce06745A3fE9e61Bcbc3
 
 See `NFT_RECEIPT_DESIGN.md` for architecture notes. Implemented contracts:
 
-- `src/BankrFeeRightsReceipt.sol` — ERC721 `BFRR`, mint/burn only by escrow.
+- `src/BankrFeeRightsReceipt.sol` — ERC721 **`Creator Fee Rights` (`CFR`)**, mint/burn only by escrow.
 - `src/BankrEscrowV3.sol` — same fee flow as V2; `finalizeDeposit` mints the receipt; `redeemRights(tokenId)` gives Bankr rights to the NFT holder; seller `cancelRights` only while they still hold the NFT; `releaseRights` remains admin-only for emergencies.
 
 See `MVP_ROADMAP.md` for how escrow + receipt + fixed sale fit together.
@@ -192,7 +192,7 @@ Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor
 
 ### Deploy `BankrEscrowV3` on Base mainnet (production redeploy)
 
-`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt (BFRR)**. Redeploy when you want new on-chain SVG/metadata (e.g. ticker/token-name art); **existing** BFRRs on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
+`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt NFT (`CFR`)**. Redeploy when you want new on-chain SVG/metadata (e.g. ticker/token-name art); **existing** receipts on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
 
 **1. Pick fee managers**
 
@@ -236,7 +236,7 @@ Set or update **before** `npm run build`:
 |----------|--------|
 | `VITE_ESCROW_ADDRESS` | New escrow address |
 | `VITE_DEFAULT_RECEIPT_COLLECTION` | **New** `BankrFeeRightsReceipt` (from `escrow.receipt()` on BaseScan) |
-| `VITE_RECEIPT_COLLECTION_ALIASES` | Optional comma list of **previous** BFRR addresses so wallets still see old listings |
+| `VITE_RECEIPT_COLLECTION_ALIASES` | Optional comma list of **previous** receipt NFT contracts so wallets still see old listings |
 
 `VITE_MARKETPLACE_ADDRESS` is unchanged unless you also redeploy `FeeRightsFixedSale`.
 

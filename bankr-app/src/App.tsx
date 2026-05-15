@@ -117,7 +117,7 @@ function envAddr(name: string): string {
   return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
 }
 
-/** Comma-separated `0x…` addresses from env (e.g. legacy BFRR collections to scan alongside the default). */
+/** Comma-separated `0x…` addresses from env (e.g. legacy receipt collections to scan alongside the default). */
 function envAddrCsvList(name: string): Address[] {
   const raw = (import.meta as ImportMeta).env[name];
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -139,7 +139,7 @@ function receiptRowKey(collection: Address, tokenId: string): string {
   return `${getAddress(collection).toLowerCase()}|${tokenId}`;
 }
 
-const ESCROW_DEFAULT: Address = "0xFb28D9C636514f8a9D129873750F9b886707d95F";
+const ESCROW_DEFAULT: Address = "0x7BD14E540Ac55E229587Bf3Cd0Fc815A7afcf461";
 
 function escrowAddressFromEnv(): Address {
   const raw = (import.meta as ImportMeta).env.VITE_ESCROW_ADDRESS;
@@ -195,7 +195,7 @@ function normalizeDisplayText(raw: string): string {
 function listingCardPlaceholderSvg(line1: string, line2: string): string {
   const a = svgTextSafe(line1, 44) || "Fee rights receipt";
   const b = svgTextSafe(line2, 56);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#15101f"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="62" text-anchor="middle" fill="#f97316" font-family="ui-monospace,monospace" font-size="11" font-weight="600" letter-spacing="0.12em">BFRR</text><text x="200" y="128" text-anchor="middle" fill="#fafafa" font-family="system-ui,sans-serif" font-size="15" font-weight="650">${a}</text>${b ? `<text x="200" y="166" text-anchor="middle" fill="#a3a3a3" font-family="ui-monospace,monospace" font-size="12">${b}</text>` : ""}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#15101f"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="62" text-anchor="middle" fill="#f97316" font-family="ui-monospace,monospace" font-size="11" font-weight="600" letter-spacing="0.12em">CFR</text><text x="200" y="128" text-anchor="middle" fill="#fafafa" font-family="system-ui,sans-serif" font-size="15" font-weight="650">${a}</text>${b ? `<text x="200" y="166" text-anchor="middle" fill="#a3a3a3" font-family="ui-monospace,monospace" font-size="12">${b}</text>` : ""}</svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -514,7 +514,7 @@ async function fetchActiveListings(
   return out;
 }
 
-/** On-chain fields used for home search (BFRR listings); non-BFRR rows use listing fields only. */
+/** On-chain fields used for home search (fee-rights NFT listings); others use listing fields only. */
 type ListingSearchEnrich = {
   factoryName: string;
   poolId: string;
@@ -930,7 +930,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     ? `${launchedSymbol} fee rights`
     : tickerLine || metaName || "Fee rights receipt";
   const subline = [
-    serialLabel ? `BFRR #${serialLabel}` : null,
+    serialLabel ? `CFR #${serialLabel}` : null,
     factoryName && factoryName.toLowerCase() !== "bankr" ? factoryName : factoryName ? "Bankr" : null,
   ]
     .filter(Boolean)
@@ -942,7 +942,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     !staticDisplay &&
     descRaw !== headline &&
     descRaw !== tickerLine &&
-    !/^bankr fee rights receipt/i.test(descRaw);
+    !/^(bankr fee rights receipt|creator fee rights)/i.test(descRaw);
 
   const detailLines = useMemo(() => {
     const lines: string[] = [];
@@ -950,7 +950,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     if (t0addr && t1addr) lines.push(`Pool: ${shortAddr(t0addr)} / ${shortAddr(t1addr)}`);
     if (serialLabel) lines.push(`Serial #${serialLabel}`);
     lines.push(`Token ID: ${id}`);
-    if (descRaw && !/^bankr fee rights receipt/i.test(descRaw)) lines.push(descRaw);
+    if (descRaw && !/^(bankr fee rights receipt|creator fee rights)/i.test(descRaw)) lines.push(descRaw);
     return lines;
   }, [tickerLine, t0addr, t1addr, serialLabel, id, descRaw]);
 
@@ -977,7 +977,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
       onError={() => setImgBroken(true)} />
   ) : (
     <div className="bfrr-card__img-placeholder">
-      <span className="bfrr-card__badge">BFRR</span>
+      <span className="bfrr-card__badge">CFR</span>
       {meta.remoteLoading && !imgSrc ? (
         <span className="bfrr-card__serial"><span className="spinner" /> Metadata…</span>
       ) : (
@@ -1300,7 +1300,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         />
       ) : (
         <div className="listing-card__img-placeholder">
-          <span className="bfrr-card__badge">BFRR</span>
+          <span className="bfrr-card__badge">CFR</span>
           <span className="bfrr-card__serial">
             {meta.remoteLoading && !chainImg && !bankrImg ? (
               <><span className="spinner" /> Metadata…</>
@@ -1702,7 +1702,7 @@ export default function App() {
     [allTokenIds],
   );
 
-  // Auto-scan when wallet connects (on-chain only — same wallet that holds the BFRR)
+  // Auto-scan when wallet connects (on-chain only — same wallet that holds the receipts)
   useEffect(() => {
     if (!isConnected || !address || receiptScanTargets.length === 0 || !publicClient) return;
     const key = `${getAddress(address)}|${receiptScanTargetsKey}`;
@@ -1861,7 +1861,7 @@ export default function App() {
         label = "Could not verify (RPC error). Try Refresh or another RPC.";
       } else if (ownershipReady && q?.status === "success" && (q.data === null || q.data === undefined)) {
         label =
-          "This wallet is not ownerOf that id on your configured BFRR contracts, or the id does not exist there. Add the NFT contract to VITE_RECEIPT_COLLECTION_ALIASES if it is a legacy collection.";
+          "This wallet is not ownerOf that id on your configured fee-rights NFT contracts, or the id does not exist there. Add the NFT contract to VITE_RECEIPT_COLLECTION_ALIASES if it is a legacy collection.";
       }
       return { id, label };
     }).filter((x): x is { id: string; label: string } => x !== null);
@@ -2010,7 +2010,7 @@ export default function App() {
     <div>
       <nav className="nav">
         <div className="nav-left">
-          <div className="nav-logo">Bankr <span>Sale</span></div>
+          <div className="nav-logo">Token <span>Marketplace</span></div>
           <div className="app-tabs" role="tablist" aria-label="Main sections">
             <button
               type="button"
@@ -2073,7 +2073,7 @@ export default function App() {
       {mainTab === "home" && (
         <>
           <div className="hero hero--compact">
-            <h1>Tokens for sale</h1>
+            <h1>Listings</h1>
             <p className="muted">Creator fee rights · Base</p>
           </div>
 
@@ -2442,7 +2442,7 @@ export default function App() {
                       NFTs in your wallet
                       <InfoTip label="About these NFTs">
                         <p>
-                          Each item is a BFRR fee-rights NFT on Base. This list is NFTs you hold that are not listed on this
+                          Each item is a creator fee-rights NFT on Base. This list is NFTs you hold that are not listed on this
                           site yet. <strong>List</strong> sets price (approve + list when needed). <strong>Return to my wallet</strong> moves the token from escrow back to your wallet without a sale listing.
                         </p>
                       </InfoTip>
@@ -2661,7 +2661,7 @@ export default function App() {
 
               {(!marketplace || receiptScanTargets.length === 0) && (
                 <p className="muted one-liner" style={{ marginTop: "1rem" }}>
-                  Wallet and NFT features need a configured deployment (marketplace and BFRR addresses). If you expected this to work, contact the site operator.
+                  Wallet and NFT features need a configured deployment (marketplace and receipt collection addresses). If you expected this to work, contact the site operator.
                 </p>
               )}
 
@@ -2721,7 +2721,7 @@ export default function App() {
                 <summary>What is this NFT?</summary>
                 <div className="bfrr-primer__body">
                   <p>
-                    It is a BFRR fee-rights NFT on Base — proof you escrowed creator fees for a token pair. Use <strong>List</strong> on a token row to complete escrow and mint one, or <strong>List</strong> on an NFT you already hold to set a price.
+                    It is a creator fee-rights NFT on Base — proof you escrowed fee rights for a token pair. Use <strong>List</strong> on a token row to complete escrow and mint one, or <strong>List</strong> on an NFT you already hold to set a price.
                   </p>
                 </div>
               </details>

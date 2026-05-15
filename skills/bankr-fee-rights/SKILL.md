@@ -1,17 +1,17 @@
 ---
 name: bankr-fee-rights
-description: Bankr Fee Rights Receipts (BFRR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve correct fee manager for getShares, DM-friendly sell/buy intents. Use when the user sells or buys fee rights, DMs Bankr to list a token, prepareDeposit reverts, allowedFeeManager, wrong fee manager, beneficiary order, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
-tags: [bankr, base, bfrr, escrow, doppler, defi]
-version: 9
+description: Creator fee rights receipts (ERC721 CFR) on Base — escrow prepare/finalize, fee beneficiary to escrow, list/buy, allowlist fee managers, resolve fee manager for getShares, DM-friendly sell/buy intents. Works across launch venues (Bankr and compatible managers). Use when the user sells or buys fee rights, prepareDeposit reverts, allowedFeeManager, wrong fee manager, listingId, or BankrEscrowV3 vs FeeRightsFixedSale confusion.
+tags: [bankr, base, cfr, escrow, doppler, defi, fee-rights]
+version: 10
 metadata:
   clawdbot:
     emoji: "🧾"
     homepage: "https://github.com/anondevv69/bankrtokennft/tree/main/fee-rights-exchange/skills/bankr-fee-rights"
 ---
 
-# Bankr Fee Rights (BFRR) — Base mainnet
+# Creator fee rights (CFR) — Base mainnet
 
-Guidance for agents helping users with **Bankr fee rights** custody, **BFRR** receipts, and **FeeRightsFixedSale** listings on **Base (chain id 8453)**.
+Guidance for agents helping users with **creator fee rights** custody (ERC721 **CFR** receipts), **BankrEscrowV3**, and **FeeRightsFixedSale** listings on **Base (chain id 8453)**. Launch venues (Bankr, others) share the same escrow ABI when the fee manager implements **`IBankrFees`**.
 
 **Primary UX:** the **Bankr Marketplace mini-app** should orchestrate txs (queued steps + receipts + one summary confirm). This skill supports **DMs / Ask Bankr / support** so users can still succeed with **structured facts** when the app is wrong or unavailable — **do not** treat pasted raw JSON as the only execution path; prefer **structured** “send transaction … calling …” instructions (see [QR Coin skill pattern](https://github.com/BankrBot/skills/blob/main/qrcoin/SKILL.md)).
 
@@ -29,9 +29,9 @@ These are **example production addresses** from this project’s Base deploy; **
 
 | Role | Address |
 |------|---------|
-| **BankrEscrowV3** | `0xFb28D9C636514f8a9D129873750F9b886707d95F` |
-| **BankrFeeRightsReceipt (BFRR)** | `0xB9E56dA4B83e77657296D7dE694754bd8b7d00db` |
-| **FeeRightsFixedSale** (marketplace) | `0xA8163A62030a74F946eC73422EE692efE68AFE0B` |
+| **BankrEscrowV3** | `0x7BD14E540Ac55E229587Bf3Cd0Fc815A7afcf461` *(latest deploy — verify)* |
+| **Creator Fee Rights receipt (`CFR`)** | `0x02441aDdC542A3a3283c4468780eB876F9ADA8BA` *(from `escrow.receipt()` — verify)* |
+| **FeeRightsFixedSale** (marketplace) | From **`VITE_MARKETPLACE_ADDRESS`** / operator docs *(verify on BaseScan)* |
 
 Other addresses (**fee manager**, **poolId**, **token0/token1**) are **per launch** — resolve from your app’s metadata, Doppler/Bankr public APIs, or on-chain reads. Wrong `poolId` / token order ⇒ `prepareDeposit` reverts or wrong pool.
 

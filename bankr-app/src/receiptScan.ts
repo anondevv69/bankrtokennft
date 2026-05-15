@@ -202,7 +202,7 @@ export async function getTransferLogsChunked(
   return out;
 }
 
-/** Discover BFRR token IDs held by `owner` (Alchemy NFT API when possible, else Transfer logs). */
+/** Discover fee-rights receipt token IDs held by `owner` (Alchemy NFT API when possible, else Transfer logs). */
 export async function scanWalletReceiptTokenIds(
   client: PublicClient,
   owner: Address,

@@ -50,7 +50,7 @@ The dev UI lists **separate connect buttons** (MetaMask, Coinbase Wallet, option
 
 For a **phone wallet** or a wallet that is not the browser’s default `window.ethereum`, add **`VITE_WALLETCONNECT_PROJECT_ID`** to `.env` (free project id from [Reown Cloud](https://cloud.reown.com/)), restart `npm run dev`, then use the **WalletConnect** button.
 
-**Receipt token IDs:** BFRR is not enumerable on-chain. This app shows **`balanceOf`** for the receipt contract, a **BaseScan inventory** link, and a **Transfer log scan** over the last _N_ blocks (`VITE_RECEIPT_SCAN_BLOCKS`, default 80000). Older mints may not appear — paste `tokenId` from `escrow.tokenIdFor` or Bankr if needed.
+**Receipt token IDs:** The receipt ERC721 is not enumerable on-chain. This app shows **`balanceOf`** for the receipt contract, a **BaseScan inventory** link, and a **Transfer log scan** over the last _N_ blocks (`VITE_RECEIPT_SCAN_BLOCKS`, default 80000). Older mints may not appear — paste `tokenId` from `escrow.tokenIdFor` or your launch tooling if needed.
 
 ### Vite env vars (important for deploys)
 

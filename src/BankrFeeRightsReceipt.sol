@@ -7,12 +7,9 @@ import {Strings} from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title BankrFeeRightsReceipt
-/// @notice ERC721 receipt minted when escrow finalizes custody of Bankr fee rights.
-///         Each token has a sequential serial number (#1, #2 …) and a fully on-chain
-///         SVG image that shows the token pair, factory, pool, and original seller.
-/// @dev Only the escrow contract may mint or burn. The `factoryName` field in Position
-///      lets future factories (Bankr, Clanker, …) brand their receipts without
-///      redeploying this contract.
+/// @notice ERC721 receipt minted when escrow finalizes custody of transferable creator fee rights.
+///         Works with any fee-manager contract that matches `IBankrFees`. Serial # in metadata is per mint.
+/// @dev Only the escrow contract may mint or burn. `factoryName` brands the launch venue (Bankr, Clanker, …).
 contract BankrFeeRightsReceipt is ERC721 {
     address private constant WETH_BASE = 0x4200000000000000000000000000000000000006;
 
@@ -23,7 +20,7 @@ contract BankrFeeRightsReceipt is ERC721 {
         address token0;
         address token1;
         address seller;
-        string factoryName; // e.g. "Bankr", "Clanker" — set by escrow at mint time
+        string factoryName; // launch venue label — set by escrow at mint time
     }
 
     address public immutable escrow;
@@ -43,7 +40,7 @@ contract BankrFeeRightsReceipt is ERC721 {
         _;
     }
 
-    constructor(address escrow_) ERC721("Bankr Fee Rights Receipt", "BFRR") {
+    constructor(address escrow_) ERC721("Creator Fee Rights", "CFR") {
         if (escrow_ == address(0)) revert ZeroAddress();
         escrow = escrow_;
     }
@@ -104,12 +101,12 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory svg
     ) private pure returns (string memory) {
         string memory head = string.concat(
-            '{"name":"Bankr Fee Rights #',
+            '{"name":"Creator Fee Rights #',
             sSerial,
             '",',
             '"description":"',
             _safe(fact),
-            " fee rights on Base: ",
+            " creator fee rights on Base: ",
             _safe(ticker),
             " (",
             _safe(tokenName),
@@ -209,8 +206,8 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory boxH = showName ? "58" : "48";
         string memory lineY = showName ? "200" : "194";
         return string.concat(
-            '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">BANKR FEE RIGHTS</text>',
-            '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">BFRR #',
+            '<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">CREATOR FEE RIGHTS</text>',
+            '<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">CFR #',
             sSerial,
             "</text>",
             '<rect x="32" y="130" width="356" height="',
@@ -245,7 +242,7 @@ contract BankrFeeRightsReceipt is ERC721 {
             _svgRow(ySell, "SELLER", _shortAddr(pos.seller)),
             _svgRow(yFee, "FEE MGR", _shortAddr(pos.feeManager)),
             '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
-            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Bankr Fee Rights Receipt - Base mainnet</text>',
+            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Creator fee rights - Base mainnet</text>',
             '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
             sSerial,
             "</text>"

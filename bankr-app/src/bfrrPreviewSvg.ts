@@ -1,4 +1,4 @@
-/** Client-rendered BFRR receipt image (ticker + token name, no WETH pair line). */
+/** Client-rendered fee-rights receipt image (ticker + token name, no WETH pair line). */
 
 function esc(s: string): string {
   return s
@@ -24,7 +24,7 @@ export type BfrrPreviewOpts = {
   feeManager?: string | null;
 };
 
-/** Matches on-chain BFRR card layout; omits WETH from the pair headline. */
+/** Matches on-chain receipt card layout; omits WETH from the pair headline. */
 export function bfrrReceiptPreviewDataUri(opts: BfrrPreviewOpts): string {
   const serial = esc(clip(opts.serial, 8));
   const ticker = esc(clip(opts.ticker, 14));
@@ -54,8 +54,8 @@ export function bfrrReceiptPreviewDataUri(opts: BfrrPreviewOpts): string {
 <rect x="18" y="48" width="384" height="236" rx="16" fill="#09090b" stroke="#f97316" stroke-opacity="0.25" stroke-width="1"/>
 <rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#fdba74" stroke-opacity="0.45"/>
 <text x="336" y="77" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">${fact}</text>
-<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">BANKR FEE RIGHTS</text>
-<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">BFRR #${serial}</text>
+<text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">CREATOR FEE RIGHTS</text>
+<text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">CFR #${serial}</text>
 <rect x="32" y="130" width="356" height="${showName ? 58 : 48}" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>
 <text x="48" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TICKER</text>
 <text x="48" y="172" font-family="ui-monospace,monospace" font-size="20" fill="#fdba74" font-weight="700">${ticker}</text>
@@ -68,7 +68,7 @@ ${showName ? `<text x="210" y="152" font-family="ui-monospace,monospace" font-si
 <text x="32" y="266" font-family="ui-monospace,monospace" font-size="10" fill="#71717a" font-weight="600">FEE MGR</text>
 <text x="118" y="266" font-family="ui-monospace,monospace" font-size="10" fill="#e4e4e7">${feeMgr}</text>
 <line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>
-<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Bankr Fee Rights Receipt - Base</text>
+<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace · Base</text>
 <text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#${serial}</text>
 </svg>`;
 

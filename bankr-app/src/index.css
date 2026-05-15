@@ -605,7 +605,7 @@ button { cursor: pointer; font-family: var(--font); }
   white-space: nowrap;
 }
 
-/* ── BFRR cards (your wallet) ── */
+/* ── Receipt NFT cards (your wallet) ── */
 .bfrr-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -1455,7 +1455,7 @@ input::placeholder { color: var(--muted); }
   max-width: none;
 }
 
-/* ── “Get a BFRR” explainer ── */
+/* ── “Get a receipt NFT” explainer ── */
 .bfrr-primer {
   margin: 1.25rem 0 0.5rem;
   background: var(--surface);

@@ -86,7 +86,7 @@ export function normalizeLaunchedTicker(raw: string | null | undefined): string 
   return isWethHumanLabel(t) ? null : t;
 }
 
-/** Pool labels for listings and BFRR cards (launched ticker/name only). */
+/** Pool labels for listings and receipt NFT cards (launched ticker/name only). */
 export function formatBankrPoolLabels(
   token0: Address | undefined,
   token1: Address | undefined,
