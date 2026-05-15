@@ -839,6 +839,33 @@ input::placeholder { color: var(--muted); }
 }
 .redeem-label strong { color: var(--text); display: block; font-size: 0.85rem; }
 
+.redeem-row__btn-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  max-width: min(100%, 280px);
+}
+
+.sell-redeem-status {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.profile-receipt-row__status {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.profile-receipt-row--pending {
+  border-color: var(--accent-md);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.25);
+}
+
 /* ── Listings grid ── */
 .listings-grid {
   display: grid;

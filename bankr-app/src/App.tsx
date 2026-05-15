@@ -539,7 +539,8 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 
   const run = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* surfaced by writeError */ } };
 
-  const listBusy = listStep !== null || isPending;
+  const [redeemPhase, setRedeemPhase] = useState(false);
+  const listBusy = listStep !== null || isPending || redeemPhase;
   const listLabel =
     listStep === "approve" ? (
       <><span className="spinner" /> Approve in wallet…</>
@@ -618,21 +619,31 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
             </p>
           </InfoTip>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm"
-          disabled={txDisabled || !isBfrrOwner || tokenId === null || listBusy}
-          title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
-          onClick={() => run(async () => {
-            await writeContractAsync({
-              address: ESCROW_ADDRESS, abi: escrowAbi, functionName: "redeemRights",
-              args: [tokenId!], chainId: MVP_CHAIN_ID,
-            });
-          })}>
-          {isPending && listStep === null ? (
-            <><span className="spinner" /> Wallet…</>
-          ) : (
-            "Return to my wallet"
+        <div className="redeem-row__btn-wrap">
+          <button type="button" className="btn btn-ghost btn-sm"
+            disabled={txDisabled || !isBfrrOwner || tokenId === null || listBusy}
+            title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
+            onClick={() => run(async () => {
+              setRedeemPhase(true);
+              try {
+                await writeContractAsync({
+                  address: ESCROW_ADDRESS, abi: escrowAbi, functionName: "redeemRights",
+                  args: [tokenId!], chainId: MVP_CHAIN_ID,
+                });
+              } finally {
+                setRedeemPhase(false);
+              }
+            })}>
+            {redeemPhase ? (
+              <><span className="spinner" /> Returning…</>
+            ) : (
+              "Return to my wallet"
+            )}
+          </button>
+          {redeemPhase && (
+            <p className="muted sell-redeem-status">Confirm in your wallet, then wait for Base to include the transaction.</p>
           )}
-        </button>
+        </div>
       </div>
     </div>
   );
@@ -667,6 +678,8 @@ export default function App() {
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
   const walletScanKeyRef = useRef("");
+  /** Profile row: which BFRR tokenId is currently executing `redeemRights` (for button + row hint). */
+  const [redeemingForId, setRedeemingForId] = useState<string | null>(null);
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
@@ -1435,7 +1448,10 @@ export default function App() {
 
                   <div className="profile-receipt-list">
                     {unlistedBfrrIds.map((id) => (
-                      <div key={id} className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}`}>
+                      <div
+                        key={id}
+                        className={`profile-receipt-row${selectedId === id ? " profile-receipt-row--open" : ""}${redeemingForId === id ? " profile-receipt-row--pending" : ""}`}
+                      >
                         <BfrrCard
                           tokenId={id}
                           collection={collection}
@@ -1457,21 +1473,35 @@ export default function App() {
                             className="btn btn-ghost btn-sm"
                             disabled={txDisabled}
                             onClick={() => run(async () => {
-                              await writeContractAsync({
-                                address: ESCROW_ADDRESS,
-                                abi: escrowAbi,
-                                functionName: "redeemRights",
-                                args: [BigInt(id)],
-                                chainId: MVP_CHAIN_ID,
-                              });
-                              setSelectedId(null);
-                              setScanEpoch((e) => e + 1);
-                              void refetchListings();
+                              setRedeemingForId(id);
+                              try {
+                                await writeContractAsync({
+                                  address: ESCROW_ADDRESS,
+                                  abi: escrowAbi,
+                                  functionName: "redeemRights",
+                                  args: [BigInt(id)],
+                                  chainId: MVP_CHAIN_ID,
+                                });
+                                setSelectedId(null);
+                                setScanEpoch((e) => e + 1);
+                                void refetchListings();
+                              } finally {
+                                setRedeemingForId(null);
+                              }
                             })}
                           >
-                            Return to my wallet
+                            {redeemingForId === id ? (
+                              <><span className="spinner" /> Returning…</>
+                            ) : (
+                              "Return to my wallet"
+                            )}
                           </button>
                         </div>
+                        {redeemingForId === id && (
+                          <p className="profile-receipt-row__status muted">
+                            Confirm in your wallet, then wait for Base to include the transaction.
+                          </p>
+                        )}
                         {selectedId === id && (
                           <div className="profile-receipt-row__panel">
                             <SellPanel
