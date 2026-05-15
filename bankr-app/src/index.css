@@ -469,7 +469,7 @@ button { cursor: pointer; font-family: var(--font); }
 
 .bfrr-card--static {
   cursor: default;
-  max-width: 160px;
+  max-width: 220px;
 }
 .bfrr-card--static:hover { border-color: var(--border); }
 .bfrr-card--static.active { border-color: var(--accent); }
@@ -514,6 +514,44 @@ button { cursor: pointer; font-family: var(--font); }
 
 .bfrr-card__footer {
   padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.bfrr-card__title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bfrr-card__desc {
+  font-size: 0.68rem;
+  color: var(--muted-2);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.bfrr-card__pair {
+  font-size: 0.66rem;
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.bfrr-card__id-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
 }
 
 .bfrr-card__id {
@@ -523,7 +561,17 @@ button { cursor: pointer; font-family: var(--font); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
+
+.bfrr-card__scan {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.bfrr-card__scan:hover { text-decoration: underline; }
 
 /* ── Sell panel ── */
 .sell-panel {
@@ -691,6 +739,23 @@ input::placeholder { color: var(--muted); }
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
+}
+
+.listing-card__headline {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.listing-card__sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.25;
 }
 
 .listing-card__price {

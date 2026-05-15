@@ -120,13 +120,24 @@ function launchRowHref(row: Record<string, unknown>, wallet: string): string {
   return `https://bankr.bot/launches/search?q=${encodeURIComponent(wallet)}`;
 }
 
-function parseNftImage(tokenUri: unknown): string | null {
-  if (!tokenUri || typeof tokenUri !== "string") return null;
+function parseDataUriJsonMetadata(tokenUri: unknown): {
+  name?: string;
+  description?: string;
+  image?: string | null;
+} {
+  if (!tokenUri || typeof tokenUri !== "string") return {};
+  if (!tokenUri.startsWith("data:application/json;base64,")) return {};
   try {
     const b64 = tokenUri.replace("data:application/json;base64,", "");
-    const json = JSON.parse(atob(b64)) as { image?: string };
-    return json.image ?? null;
-  } catch { return null; }
+    const json = JSON.parse(atob(b64)) as { name?: string; description?: string; image?: string };
+    return {
+      name: typeof json.name === "string" ? json.name : undefined,
+      description: typeof json.description === "string" ? json.description : undefined,
+      image: typeof json.image === "string" ? json.image : null,
+    };
+  } catch {
+    return {};
+  }
 }
 
 // ── ABIs (minimal inline) ────────────────────────────────────────────────────
@@ -228,14 +239,32 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
     args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
     query: { enabled: tid !== null && !wrongNetwork },
   });
+  const { data: position } = useReadContract({
+    address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "positionOf",
+    args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
+    query: { enabled: tid !== null && !wrongNetwork },
+  });
 
-  const imgSrc = useMemo(() => parseNftImage(rawUri), [rawUri]);
+  const meta = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
+  const imgSrc = meta.image ?? null;
+
+  const title =
+    (position && typeof position.factoryName === "string" && position.factoryName.trim())
+      ? position.factoryName.trim()
+      : (meta.name?.trim() || "Fee rights receipt");
+
+  const pairLabel =
+    position && typeof position.token0 === "string" && typeof position.token1 === "string"
+      ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
+      : null;
+
+  const basescanNft = `https://basescan.org/nft/${collection}/${id}`;
 
   const body = (
     <>
       {imgSrc ? (
         <img className="bfrr-card__img" src={imgSrc}
-          alt={serial !== undefined ? `BFRR #${String(serial)}` : "BFRR"} />
+          alt={title} />
       ) : (
         <div className="bfrr-card__img-placeholder">
           <span className="bfrr-card__badge">BFRR</span>
@@ -243,8 +272,36 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
         </div>
       )}
       <div className="bfrr-card__footer">
-        <div className="bfrr-card__id" title={id}>
-          {serial !== undefined ? `#${String(serial)}` : id.slice(0, 6) + "…" + id.slice(-4)}
+        <div className="bfrr-card__title" title={title}>{title}</div>
+        {meta.description && (
+          <div className="bfrr-card__desc" title={meta.description}>{meta.description}</div>
+        )}
+        {pairLabel && (
+          <div className="bfrr-card__pair mono" title={`Pool tokens: ${pairLabel}`}>Pair {pairLabel}</div>
+        )}
+        <div className="bfrr-card__id-row">
+          <span className="bfrr-card__id mono" title={`Token ID ${id}`}>
+            {serial !== undefined ? `#${String(serial)}` : id.slice(0, 6) + "…" + id.slice(-4)}
+          </span>
+          <span
+            className="bfrr-card__scan"
+            role="link"
+            tabIndex={0}
+            title="Open on BaseScan"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(basescanNft, "_blank", "noopener,noreferrer");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(basescanNft, "_blank", "noopener,noreferrer");
+              }
+            }}
+          >
+            BaseScan
+          </span>
         </div>
       </div>
     </>
@@ -284,8 +341,22 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
     functionName: "serialOf", args: [li.tokenId], chainId: MVP_CHAIN_ID,
     query: { enabled: isBfrr && !wrongNetwork },
   });
+  const { data: position } = useReadContract({
+    address: isBfrr ? li.collection : undefined, abi: bankrFeeRightsReceiptAbi,
+    functionName: "positionOf", args: [li.tokenId], chainId: MVP_CHAIN_ID,
+    query: { enabled: isBfrr && !wrongNetwork },
+  });
 
-  const imgSrc = useMemo(() => parseNftImage(rawUri), [rawUri]);
+  const meta = useMemo(() => parseDataUriJsonMetadata(rawUri), [rawUri]);
+  const imgSrc = meta.image ?? null;
+  const receiptTitle =
+    (position && typeof position.factoryName === "string" && position.factoryName.trim())
+      ? position.factoryName.trim()
+      : (meta.name?.trim() || null);
+  const pairLabel =
+    position && typeof position.token0 === "string" && typeof position.token1 === "string"
+      ? `${shortAddr(getAddress(position.token0))} / ${shortAddr(getAddress(position.token1))}`
+      : null;
   const imSeller = address !== undefined && isAddress(li.seller) &&
     getAddress(li.seller) === getAddress(address);
 
@@ -293,7 +364,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
     <div className="listing-card">
       {imgSrc ? (
         <img className="listing-card__img" src={imgSrc}
-          alt={serial !== undefined ? `BFRR #${String(serial)}` : "BFRR"} />
+          alt={receiptTitle ?? "Listing"} />
       ) : (
         <div className="listing-card__img-placeholder">
           <span className="bfrr-card__badge">BFRR</span>
@@ -301,6 +372,8 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         </div>
       )}
       <div className="listing-card__body">
+        {receiptTitle && <div className="listing-card__headline">{receiptTitle}</div>}
+        {pairLabel && <div className="listing-card__sub mono">{pairLabel}</div>}
         <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__meta">
           <div className="listing-card__meta-row">
