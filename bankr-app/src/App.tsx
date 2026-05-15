@@ -2880,16 +2880,6 @@ export default function App() {
                       {refreshBusy ? <><span className="spinner" />Refreshing…</> : "Refresh"}
                     </button>
                   </div>
-                  <p className="muted one-liner">
-                    Bankr: list when a <strong>pool id</strong> is present. Clanker: list when we have a <strong>pool contract</strong> (filled automatically when possible, or paste under the row).
-                  </p>
-                  {receiptCollectionAliases.length > 0 && (
-                    <p className="muted one-liner" style={{ marginTop: "0.45rem", lineHeight: 1.5 }}>
-                      This deployment scans <strong>multiple</strong> receipt NFT contracts (
-                      <span className="mono">VITE_RECEIPT_COLLECTION_ALIASES</span>) so legacy mints still show.
-                      For one OpenSea collection, Bankr and Clanker escrows must share the same <span className="mono">receipt()</span> — see repo README <strong>Deploy Token Marketplace</strong>.
-                    </p>
-                  )}
                   <div
                     className="bankr-panel__clanker-import"
                     style={{
