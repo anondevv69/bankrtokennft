@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -35,6 +36,12 @@ import {
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
 import { normalizePoolId, rowPoolIdHex, launchRowLabel, launchedTokenFromWethPair, WETH_BASE } from "./lib/escrowArgs";
+import {
+  formatListFlowError,
+  isMarketplaceApproved,
+  readNftOwner,
+  waitForMarketplaceApproval,
+} from "./listingFlow";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -681,28 +688,37 @@ function BfrrPreviewModal({
 }) {
   useEffect(() => {
     if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open, onClose]);
 
   if (!open) return null;
 
-  return (
-    <div className="settings-overlay bfrr-preview-overlay" onClick={onClose} role="presentation">
+  return createPortal(
+    <div
+      className="settings-overlay bfrr-preview-overlay"
+      onMouseDown={onClose}
+      role="presentation"
+    >
       <div
         className="settings-sheet bfrr-preview-sheet"
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="bfrr-preview-title"
       >
         <div className="settings-sheet__head">
           <h3 id="bfrr-preview-title">NFT preview</h3>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
-            ✕
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close preview">
+            Close
           </button>
         </div>
         {imgSrc && !imgBroken ? (
@@ -740,9 +756,11 @@ function BfrrPreviewModal({
           Open on BaseScan
         </a>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
+
 
 function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, expandable }: {
   tokenId: string; collection: Address; selected: boolean;
@@ -872,6 +890,9 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
   useEffect(() => {
     setImgBroken(false);
   }, [imgSrc]);
+  useEffect(() => {
+    if (selected) setPreviewOpen(false);
+  }, [selected]);
 
   const openPreview = (e?: { stopPropagation?: () => void }) => {
     e?.stopPropagation?.();
@@ -1371,34 +1392,44 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     listLock.current = true;
     setListErr(null);
     onListFlowStart?.();
+    const me = getAddress(address);
     try {
-      if (!isBfrrOwner) {
-        throw new Error("This wallet does not hold this NFT on Base. Connect the wallet that owns it.");
-      }
       await ensureBaseChain(config, switchChainAsync);
 
-      if (!canPull) {
+      const owner = await readNftOwner(publicClient, collection, tokenId);
+      const mkt = getAddress(marketplace);
+      if (owner === mkt) {
+        throw new Error(
+          "This NFT is already listed on the marketplace. Open My profile → Your listings and cancel the sale first.",
+        );
+      }
+      if (owner !== me) {
+        throw new Error("This wallet does not hold this NFT on Base. Connect the wallet that owns it.");
+      }
+
+      let approved = await isMarketplaceApproved(publicClient, collection, tokenId, me, mkt);
+      if (!approved) {
         setListStep("approve");
         const approveHash = await writeContractAsync({
           address: collection,
           abi: erc721Abi,
           functionName: "approve",
-          args: [marketplace, tokenId],
+          args: [mkt, tokenId],
           chain: MVP_CHAIN,
         });
         await waitForBaseReceipt(publicClient, approveHash);
-        setListStep("list");
-      } else {
-        setListStep("list");
+        await waitForMarketplaceApproval(publicClient, collection, tokenId, me, mkt);
+        approved = true;
       }
 
+      setListStep("list");
       const priceWei = parseEther(priceNorm);
       await publicClient.simulateContract({
         address: marketplace,
         abi: feeRightsFixedSaleAbi,
         functionName: "list",
         args: [collection, tokenId, priceWei],
-        account: address,
+        account: me,
         chain: MVP_CHAIN,
       });
 
@@ -1412,7 +1443,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
       await waitForBaseReceipt(publicClient, listHash);
       await Promise.resolve(onDone());
     } catch (e) {
-      setListErr(formatTxError(e));
+      setListErr(formatListFlowError(e));
     } finally {
       listLock.current = false;
       setListStep(null);
@@ -1458,13 +1489,13 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
         {listBusy && (
           <p className="muted sell-actions__hint">
             {listStep === "approve"
-              ? "Step 1 of 2: approve the marketplace in your wallet extension (e.g. Coinbase Wallet popup)."
-              : "Step 2 of 2: confirm the list transaction. If nothing appears, open your wallet extension."}
+              ? "Step 1 of 2: approve in your wallet — listing continues automatically."
+              : "Step 2 of 2: confirm the list transaction in your wallet."}
           </p>
         )}
-        {!canPull && !listBusy && (
+        {!listBusy && (
           <p className="muted sell-actions__hint">
-            First listing needs two wallet confirmations: approve, then list.
+            One tap: if needed, approve then list (two wallet prompts, same flow).
           </p>
         )}
         {listErr && <p className="sell-actions__error" role="alert">{listErr}</p>}
@@ -1545,6 +1576,13 @@ export default function App() {
   const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
+
+  useEffect(() => {
+    const root = document.getElementById("root");
+    if (!root) return;
+    root.classList.toggle("layout-wide", mainTab === "home");
+    return () => root.classList.remove("layout-wide");
+  }, [mainTab]);
   const [homeListingSearch, setHomeListingSearch] = useState("");
   const walletScanKeyRef = useRef("");
   /** Profile row: `receiptRowKey(collection, tokenId)` while `redeemRights` is in flight. */

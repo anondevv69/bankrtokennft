@@ -44,6 +44,10 @@ body {
   padding: 0 1rem 5rem;
 }
 
+#root.layout-wide {
+  max-width: min(1240px, 97vw);
+}
+
 /* ── Utilities ── */
 .mono { font-family: var(--mono); font-size: 0.82em; }
 .muted { color: var(--muted-2); font-size: 0.85rem; }
@@ -744,7 +748,7 @@ button { cursor: pointer; font-family: var(--font); }
 }
 
 .bfrr-preview-overlay {
-  z-index: 110;
+  z-index: 200;
 }
 
 .bfrr-preview-sheet {
@@ -1029,6 +1033,17 @@ input::placeholder { color: var(--muted); }
 
 @media (min-width: 600px) {
   .listings-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+}
+
+#root.layout-wide .listings-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1.15rem;
+}
+
+@media (min-width: 900px) {
+  #root.layout-wide .listings-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
 }
 
 /* ── Listing card ── */
