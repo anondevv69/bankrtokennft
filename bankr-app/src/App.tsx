@@ -78,12 +78,24 @@ import {
   openSeaCollectionUrl,
   type OpenSeaListing,
 } from "./lib/openSeaListings";
+import type { ClankerV4RewardsSnapshot } from "./lib/clankerV4Rewards";
+import {
+  enrichClankerRowsWithV4Snapshots,
+  clankerV4AdminIndicesFor,
+  clankerV4IndexSummary,
+} from "./lib/clankerV4Rewards";
+import { resolveImportedClankerRow } from "./lib/clankerManualImport";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_LISTING_IDS_TO_SCAN = 250n;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** localStorage — Clanker token addresses manually imported when search/API lags (per wallet). */
+function lsClankerImportKey(addr: Address): string {
+  return `tm_clanker_import_v1_${getAddress(addr).toLowerCase()}`;
+}
 
 function tryParseAddress(raw: string): Address | undefined {
   const t = raw.trim();
@@ -1474,13 +1486,14 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
 // ── SellPanel ────────────────────────────────────────────────────────────────
 
 function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
-  isConnected, onDone, onListFlowStart, onListFlowEnd }: {
+  isConnected, onDone, onListFlowStart, onListFlowEnd, onRedeemSuccess }: {
   tokenIdStr: string; collection: Address; marketplace: Address;
   address: Address | undefined; txDisabled: boolean;
   isConnected: boolean;
   onDone: () => void | Promise<void>;
   onListFlowStart?: () => void;
   onListFlowEnd?: () => void;
+  onRedeemSuccess?: () => void | Promise<void>;
 }) {
   const [price, setPrice] = useState("0.01");
   const [listStep, setListStep] = useState<null | "approve" | "list">(null);
@@ -1679,6 +1692,9 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
               Calls the correct fee-rights escrow’s <strong>redeemRights</strong>: it <strong>burns this receipt NFT</strong> and moves Bankr or Clanker fee-admin / recipient roles back to your wallet.
               This is not the same as <strong>Cancel sale</strong> on the marketplace (that only unlists the NFT here). If this button fails, ensure <span className="mono">VITE_CLANKER_V4_ESCROW_ADDRESS</span> is set when the receipt came from Clanker v4.
             </p>
+            <p style={{ marginTop: "0.5rem" }}>
+              It does <strong>not</strong> send the launch token (e.g. ASPHALT) to your wallet — only <strong>fee rights</strong> on the pool/locker. On <strong>Clanker v4</strong>, each <strong>reward index</strong> (e.g. WETH vs token split) is separate: this receipt only ever covered <strong>one</strong> index; redeem restores that index’s admin/recipient to <strong>the wallet that signs</strong>, not the others.
+            </p>
           </InfoTip>
         </div>
         <div className="redeem-row__btn-wrap">
@@ -1696,6 +1712,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
                   args: [tokenId], chain: MVP_CHAIN,
                 });
                 await waitForBaseReceipt(publicClient, hash);
+                await Promise.resolve(onRedeemSuccess?.());
               } catch (e) {
                 setListErr(formatTxError(e));
               } finally {
@@ -1745,6 +1762,12 @@ export default function App() {
   const [clankerPoolDraft, setClankerPoolDraft] = useState<Record<string, string>>({});
   const [clankerLockerDraft, setClankerLockerDraft] = useState<Record<string, string>>({});
   const [clankerManualErr, setClankerManualErr] = useState<Record<string, string>>({});
+  /** User-imported Clanker rows (token `0x` lower → row) when creator search / Clanker API is stale. */
+  const [clankerImportByToken, setClankerImportByToken] = useState<Record<string, Record<string, unknown>>>({});
+  const [clankerImportDraft, setClankerImportDraft] = useState("");
+  const [clankerImportErr, setClankerImportErr] = useState<string | null>(null);
+  const [clankerImportBusy, setClankerImportBusy] = useState(false);
+  const clankerImportsHydratedRef = useRef<string | null>(null);
   const [receiptManualPool, setReceiptManualPool] = useState("");
   const [receiptManualToken, setReceiptManualToken] = useState("");
   const [receiptManualFeeManager, setReceiptManualFeeManager] = useState("");
@@ -1758,6 +1781,75 @@ export default function App() {
     root.classList.toggle("layout-wide", mainTab === "home");
     return () => root.classList.remove("layout-wide");
   }, [mainTab]);
+
+  useEffect(() => {
+    if (!address) {
+      setClankerImportByToken({});
+      clankerImportsHydratedRef.current = null;
+    }
+  }, [address]);
+
+  useEffect(() => {
+    const keys = new Set(
+      bankrRows
+        .map((r) => rowLaunchedToken(r)?.toLowerCase())
+        .filter((x): x is string => Boolean(x)),
+    );
+    setClankerImportByToken((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const k of Object.keys(next)) {
+        if (keys.has(k)) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [bankrRows]);
+
+  useEffect(() => {
+    if (!address) return;
+    try {
+      localStorage.setItem(
+        lsClankerImportKey(getAddress(address)),
+        JSON.stringify(Object.keys(clankerImportByToken)),
+      );
+    } catch {
+      /* quota / private mode */
+    }
+  }, [address, clankerImportByToken]);
+
+  useEffect(() => {
+    if (!address || !publicClient) return;
+    const id = getAddress(address).toLowerCase();
+    if (clankerImportsHydratedRef.current === id) return;
+    clankerImportsHydratedRef.current = id;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = localStorage.getItem(lsClankerImportKey(getAddress(address)));
+        const arr = raw ? (JSON.parse(raw) as unknown) : [];
+        if (!Array.isArray(arr)) return;
+        for (const item of arr) {
+          if (cancelled) return;
+          if (typeof item !== "string" || !item.startsWith("0x") || !isAddress(item, { strict: false })) continue;
+          const token = getAddress(item);
+          const tl = token.toLowerCase();
+          const res = await resolveImportedClankerRow(publicClient, getAddress(address), token);
+          if (!cancelled && res.ok) {
+            setClankerImportByToken((p) => (p[tl] ? p : { ...p, [tl]: res.row }));
+          }
+        }
+      } catch {
+        /* ignore corrupt LS */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, publicClient]);
+
   const [homeListingSearch, setHomeListingSearch] = useState("");
   const walletScanKeyRef = useRef("");
   /** Profile row: `receiptRowKey(collection, tokenId)` while `redeemRights` is in flight. */
@@ -2051,13 +2143,18 @@ export default function App() {
     return { heldPoolIds: pools, heldReceiptLaunchTokens: launchToks };
   }, [positionQueries]);
 
+  const bankrRowsWithImports = useMemo(
+    () => mergeCreatorFeeRows(bankrRows, Object.values(clankerImportByToken)),
+    [bankrRows, clankerImportByToken],
+  );
+
   const bankrRowsNotYetReceived = useMemo(() => {
     // Only hide launch rows while we resolve `positionOf` for receipts the wallet *actually* holds.
     // If there are no owned receipts, `heldPoolIds` is empty — there is nothing to dedupe against, so
     // do not block the list because `ownerOf` is still settling for stray / burned scanned ids.
     if (idsForWatch.length > 0 && !bfrrDedupeReady && walletOwnedReceipts.length > 0) return [];
-    if (heldPoolIds.size === 0 && heldReceiptLaunchTokens.size === 0) return bankrRows;
-    return bankrRows.filter((row) => {
+    if (heldPoolIds.size === 0 && heldReceiptLaunchTokens.size === 0) return bankrRowsWithImports;
+    return bankrRowsWithImports.filter((row) => {
       const pid = rowPoolIdHex(row);
       if (pid && heldPoolIds.has(pid.toLowerCase())) return false;
       if (row.__launchVenue === "Clanker") {
@@ -2066,7 +2163,41 @@ export default function App() {
       }
       return true;
     });
-  }, [bankrRows, heldPoolIds, heldReceiptLaunchTokens, idsForWatch.length, bfrrDedupeReady, walletOwnedReceipts.length]);
+  }, [bankrRowsWithImports, heldPoolIds, heldReceiptLaunchTokens, idsForWatch.length, bfrrDedupeReady, walletOwnedReceipts.length]);
+
+  /** Expand Clanker v4 into one row per reward index where the user is admin (each split = separate TMPR sale). */
+  const profileLaunchRows = useMemo(() => {
+    if (!address) return bankrRowsNotYetReceived;
+    const me = getAddress(address);
+    const out: Record<string, unknown>[] = [];
+    for (const row of bankrRowsNotYetReceived) {
+      if (row.__launchVenue !== "Clanker" || rowClankerLockerVersion(row) !== "v4") {
+        out.push(row);
+        continue;
+      }
+      const snap = row.__clankerV4Rewards as ClankerV4RewardsSnapshot | undefined;
+      if (!snap) {
+        out.push(row);
+        continue;
+      }
+      const adminIdx = clankerV4AdminIndicesFor(snap, me);
+      if (adminIdx.length <= 1) {
+        const idx = adminIdx.length === 1 ? adminIdx[0] : undefined;
+        out.push(idx !== undefined ? { ...row, __clankerEscrowRewardIndex: idx } : row);
+        continue;
+      }
+      for (const idx of adminIdx) {
+        const token = rowLaunchedToken(row);
+        const keyBase = token ? token.toLowerCase() : `row-${out.length}`;
+        out.push({
+          ...row,
+          __clankerEscrowRewardIndex: idx,
+          __clankerSplitListKey: `${keyBase}-${idx}`,
+        });
+      }
+    }
+    return out;
+  }, [bankrRowsNotYetReceived, address]);
 
   useEffect(() => {
     if (!ownershipReady || !selectedReceiptKey) return;
@@ -2176,6 +2307,8 @@ export default function App() {
         .map((r) => rowLaunchedToken(r))
         .filter((ta): ta is Address => ta !== null);
 
+      let rowsAfterPhase2: Record<string, unknown>[] = phase1;
+
       if (detectTargets.length > 0 && publicClient) {
         try {
           // Detect v4 tokens via tokenRewards() — one multicall for all
@@ -2251,30 +2384,37 @@ export default function App() {
           }
 
           // Apply on-chain detection results to rows
-          setBankrRows(
-            phase1.map((row) => {
-              if (!row.__clankerNeedsDetect) return row;
-              const ta = rowLaunchedToken(row);
-              if (!ta) return { ...row, __clankerDetailFailed: true };
-              const { __clankerNeedsDetect: _d, ...rest } = row;
-              const taLower = ta.toLowerCase();
-              if (v4Set.has(taLower)) return { ...rest, __clankerLocker: CLANKER_V4_DEFAULT_LOCKER };
-              const pool = poolMap.get(taLower);
-              if (pool) return { ...rest, __clankerPool: pool };
-              return { ...rest, __clankerDetailFailed: true };
-            }),
-          );
+          rowsAfterPhase2 = phase1.map((row) => {
+            if (!row.__clankerNeedsDetect) return row;
+            const ta = rowLaunchedToken(row);
+            if (!ta) return { ...row, __clankerDetailFailed: true };
+            const { __clankerNeedsDetect: _d, ...rest } = row;
+            const taLower = ta.toLowerCase();
+            if (v4Set.has(taLower)) return { ...rest, __clankerLocker: CLANKER_V4_DEFAULT_LOCKER };
+            const pool = poolMap.get(taLower);
+            if (pool) return { ...rest, __clankerPool: pool };
+            return { ...rest, __clankerDetailFailed: true };
+          });
         } catch {
           // On-chain detection failed — clear markers and show what we have
-          setBankrRows(
-            phase1.map((row) => {
-              if (!row.__clankerNeedsDetect) return row;
-              const { __clankerNeedsDetect: _d, ...rest } = row;
-              return { ...rest, __clankerDetailFailed: true };
-            }),
-          );
+          rowsAfterPhase2 = phase1.map((row) => {
+            if (!row.__clankerNeedsDetect) return row;
+            const { __clankerNeedsDetect: _d, ...rest } = row;
+            return { ...rest, __clankerDetailFailed: true };
+          });
         }
       }
+
+      // Phase 3: Clanker v4 reward splits (WETH + token legs, bps per index) for list UI + multi-split rows
+      let rowsFinal = rowsAfterPhase2;
+      if (publicClient) {
+        try {
+          rowsFinal = await enrichClankerRowsWithV4Snapshots(publicClient, rowsAfterPhase2);
+        } catch {
+          /* keep rows without snapshot */
+        }
+      }
+      setBankrRows(rowsFinal);
     } catch (e) {
       setBankrErr(
         e instanceof Error
@@ -2332,6 +2472,50 @@ export default function App() {
       } as ClankerManualFields,
     }));
   }, [clankerPoolDraft, clankerLockerDraft]);
+
+  const addClankerImport = useCallback(async () => {
+    const raw = clankerImportDraft.trim();
+    setClankerImportErr(null);
+    if (!raw.startsWith("0x") || !isAddress(raw, { strict: false })) {
+      setClankerImportErr("Enter a valid token contract address (0x…).");
+      return;
+    }
+    if (!publicClient || !address) {
+      setClankerImportErr("Connect your wallet on Base first.");
+      return;
+    }
+    const token = getAddress(raw);
+    const tl = token.toLowerCase();
+    if (clankerImportByToken[tl]) {
+      setClankerImportErr("This token is already in your imported list.");
+      return;
+    }
+    if (bankrRows.some((r) => rowLaunchedToken(r)?.toLowerCase() === tl)) {
+      setClankerImportErr("This token already appears from Bankr / Clanker search — refresh if the row is missing pool details.");
+      return;
+    }
+    setClankerImportBusy(true);
+    try {
+      const res = await resolveImportedClankerRow(publicClient, getAddress(address), token);
+      if (!res.ok) {
+        setClankerImportErr(res.message);
+        return;
+      }
+      setClankerImportByToken((p) => ({ ...p, [tl]: res.row }));
+      setClankerImportDraft("");
+    } finally {
+      setClankerImportBusy(false);
+    }
+  }, [address, publicClient, clankerImportDraft, clankerImportByToken, bankrRows]);
+
+  const removeClankerImport = useCallback((tokenLower: string) => {
+    setClankerImportByToken((prev) => {
+      if (!(tokenLower in prev)) return prev;
+      const next = { ...prev };
+      delete next[tokenLower];
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!address) {
@@ -2699,14 +2883,63 @@ export default function App() {
                   <p className="muted one-liner">
                     Bankr: list when a <strong>pool id</strong> is present. Clanker: list when we have a <strong>pool contract</strong> (filled automatically when possible, or paste under the row).
                   </p>
+                  {receiptCollectionAliases.length > 0 && (
+                    <p className="muted one-liner" style={{ marginTop: "0.45rem", lineHeight: 1.5 }}>
+                      This deployment scans <strong>multiple</strong> receipt NFT contracts (
+                      <span className="mono">VITE_RECEIPT_COLLECTION_ALIASES</span>) so legacy mints still show.
+                      For one OpenSea collection, Bankr and Clanker escrows must share the same <span className="mono">receipt()</span> — see repo README <strong>Deploy Token Marketplace</strong>.
+                    </p>
+                  )}
+                  <div
+                    className="bankr-panel__clanker-import"
+                    style={{
+                      marginTop: "0.65rem",
+                      padding: "0.65rem 0.75rem",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(63, 63, 70, 0.45)",
+                      background: "rgba(12, 12, 14, 0.35)",
+                    }}
+                  >
+                    <p className="muted" style={{ fontSize: "0.8rem", margin: "0 0 0.45rem", lineHeight: 1.45 }}>
+                      <strong>Import Clanker token</strong> — if Clanker search or metadata lags, paste the launched token contract. We re-check on-chain (v4: you must be{" "}
+                      <strong>reward admin</strong> on at least one index; WETH and token legs are often separate indices — transfer admin for each split you sell).
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem", alignItems: "center" }}>
+                      <input
+                        type="text"
+                        className="input mono"
+                        placeholder="0x… token contract"
+                        value={clankerImportDraft}
+                        disabled={clankerImportBusy || wrongNetwork}
+                        onChange={(e) => {
+                          setClankerImportDraft(e.target.value);
+                          setClankerImportErr(null);
+                        }}
+                        style={{ minWidth: "220px", flex: "1 1 200px" }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={clankerImportBusy || wrongNetwork || !publicClient}
+                        onClick={() => void addClankerImport()}
+                      >
+                        {clankerImportBusy ? "Checking…" : "Add token"}
+                      </button>
+                    </div>
+                    {clankerImportErr ? (
+                      <p className="err" style={{ fontSize: "0.78rem", marginTop: "0.4rem", marginBottom: 0 }}>
+                        {clankerImportErr}
+                      </p>
+                    ) : null}
+                  </div>
                   {idsForWatch.length > 0 && !bfrrDedupeReady && (
                     <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
                       Matching rows to NFTs you already hold…
                     </p>
                   )}
-                  {bankrRowsNotYetReceived.length > 0 ? (
+                  {profileLaunchRows.length > 0 ? (
                     <ul className="bankr-panel__list">
-                      {bankrRowsNotYetReceived.map((row, i) => {
+                      {profileLaunchRows.map((row, i) => {
                         const launched = rowLaunchedToken(row);
                         const manualKey = launched ? launched.toLowerCase() : null;
                         const manual =
@@ -2718,14 +2951,23 @@ export default function App() {
                         const poolHex = rowPoolIdHex(rowEffective);
                         const poolReady =
                           Boolean(poolHex) || rowClankerListingReady(rowEffective);
+                        const taKey = typeof ta === "string" && ta.startsWith("0x") ? ta.toLowerCase() : null;
+                        const idxTag =
+                          typeof row.__clankerEscrowRewardIndex === "number"
+                            ? `-${row.__clankerEscrowRewardIndex}`
+                            : typeof row.__clankerEscrowRewardIndex === "bigint"
+                              ? `-${row.__clankerEscrowRewardIndex.toString()}`
+                              : "";
                         const key =
-                          typeof ta === "string" && ta.startsWith("0x")
-                            ? ta.toLowerCase()
-                            : typeof pid === "string"
-                              ? `${pid}-${i}`
-                              : `row-${i}`;
+                          typeof row.__clankerSplitListKey === "string"
+                            ? row.__clankerSplitListKey
+                            : taKey
+                              ? `${taKey}${idxTag}`
+                              : typeof pid === "string"
+                                ? `${pid}-${i}`
+                                : `row-${i}`;
                         const showClankerManual =
-                          row.__launchVenue === "Clanker" &&
+                          rowEffective.__launchVenue === "Clanker" &&
                           manualKey !== null &&
                           !rowClankerListingReady(rowEffective);
                         return (
@@ -2734,19 +2976,50 @@ export default function App() {
                               <div className="bankr-panel__col">
                                 <span className="bankr-panel__name">
                                   {launchRowLabel(rowEffective)}
-                                  {row.__launchVenue === "Clanker" && !poolReady ? (
+                                  {rowEffective.__launchVenue === "Clanker" && !poolReady ? (
                                     <span className="muted" style={{ marginLeft: "0.35rem", fontSize: "0.78rem" }}>
                                       · Clanker
                                     </span>
                                   ) : null}
                                 </span>
+                                {address &&
+                                  rowEffective.__clankerV4Rewards &&
+                                  rowEffective.__launchVenue === "Clanker" &&
+                                  (() => {
+                                    const snap = rowEffective.__clankerV4Rewards as ClankerV4RewardsSnapshot;
+                                    const meL = getAddress(address).toLowerCase();
+                                    return (
+                                      <ul
+                                        className="bankr-panel__splits muted"
+                                        style={{
+                                          fontSize: "0.72rem",
+                                          margin: "0.35rem 0 0",
+                                          paddingLeft: "1.1rem",
+                                          lineHeight: 1.45,
+                                        }}
+                                      >
+                                        {snap.rewardBps.map((_, idx) => {
+                                          const am = snap.rewardAdmins[idx]?.toLowerCase() === meL;
+                                          const rec = snap.rewardRecipients[idx]?.toLowerCase() === meL;
+                                          const you =
+                                            [am && "reward admin", rec && "fee recipient"].filter(Boolean).join(" · ") ||
+                                            "—";
+                                          return (
+                                            <li key={idx}>
+                                              {clankerV4IndexSummary(snap, idx)} — you: {you}
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    );
+                                  })()}
                                 {poolHex && (
                                   <div className="bankr-panel__sub mono" title={poolHex}>
                                     Pool {poolHex.slice(0, 10)}…{poolHex.slice(-8)}
                                   </div>
                                 )}
                                 {!poolHex &&
-                                  row.__launchVenue === "Clanker" &&
+                                  rowEffective.__launchVenue === "Clanker" &&
                                   typeof rowEffective.__clankerPool === "string" &&
                                   rowEffective.__clankerPool.startsWith("0x") &&
                                   poolReady && (
@@ -2764,6 +3037,16 @@ export default function App() {
                               >
                                 ↗
                               </a>
+                              {rowEffective.__importedClanker === true && manualKey !== null ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  title="Remove this manual import (saved in this browser per wallet)"
+                                  onClick={() => removeClankerImport(manualKey)}
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 className="bankr-panel__mint btn btn-ghost btn-sm"
@@ -2771,7 +3054,7 @@ export default function App() {
                                 title={
                                   poolReady
                                     ? undefined
-                                    : row.__launchVenue === "Clanker"
+                                    : rowEffective.__launchVenue === "Clanker"
                                       ? "Paste the Uniswap V3 pool contract under this row (or set CLANKER_API_KEY on the server)."
                                       : "Pool id missing — use advanced paste or a Bankr-indexed row with pool id."
                                 }
@@ -2882,9 +3165,9 @@ export default function App() {
                       <>
                         {bankrErr ? (
                           <p className="err one-liner">{bankrErr}</p>
-                        ) : bankrRows.length === 0 ? (
+                        ) : bankrRowsWithImports.length === 0 ? (
                           <p className="muted one-liner">
-                            Nothing loaded — try <strong>Refresh</strong>, or open <strong>advanced</strong> below.
+                            Nothing loaded — try <strong>Refresh</strong>, use <strong>Import Clanker token</strong> above if search missed you, or open <strong>advanced</strong> below.
                           </p>
                         ) : !bfrrDedupeReady ? null : (
                           <p className="muted one-liner">
@@ -3189,6 +3472,7 @@ export default function App() {
                                 setSelectedReceiptKey(null);
                                 setScanEpoch((e) => e + 1);
                                 void refetchListings();
+                                void loadBankrLaunches();
                               } finally {
                                 setRedeemingForReceiptKey(null);
                               }
@@ -3222,11 +3506,17 @@ export default function App() {
                               isConnected={isConnected}
                               onListFlowStart={() => setListingBusyReceiptKey(rk)}
                               onListFlowEnd={() => setListingBusyReceiptKey(null)}
+                              onRedeemSuccess={async () => {
+                                await qc.invalidateQueries();
+                                void loadBankrLaunches();
+                                setScanEpoch((e) => e + 1);
+                              }}
                               onDone={async () => {
                                 setSelectedReceiptKey(null);
                                 await qc.invalidateQueries();
                                 await refetchListings();
                                 setScanEpoch((e) => e + 1);
+                                void loadBankrLaunches();
                               }}
                             />
                           </div>

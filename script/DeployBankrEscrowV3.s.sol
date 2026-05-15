@@ -6,8 +6,13 @@ import {BankrFeeRightsReceipt} from "../src/BankrFeeRightsReceipt.sol";
 import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 
 /// @title DeployBankrEscrowV3
-/// @notice Deploys Escrow V3 (balance-delta accounting + ERC721 receipt with on-chain SVG).
-///         The receipt contract (BankrFeeRightsReceipt) is created inside the escrow constructor.
+/// @notice Deploys Escrow V3 (balance-delta accounting + ERC721 receipt with on-chain SVG)
+///         **and a brand-new `BankrFeeRightsReceipt`**. That is a **separate** NFT contract from any
+///         existing Token Marketplace deploy — OpenSea will show it as a **different collection** than
+///         Clanker flows that use the shared TMPR from `DeployTokenMarketplace.s.sol`.
+///
+///         For production next to Clanker on one OpenSea page, prefer `DeployTokenMarketplace.s.sol`,
+///         or deploy Bankr against an existing receipt with `DeployBankrEscrowSharedReceipt.s.sol`.
 ///
 /// @dev Reads env vars:
 ///      PRIVATE_KEY           — deployer key (required)

@@ -187,16 +187,33 @@ Fill these in **after** you broadcast on Base (`chain id 8453`). Explorer: [base
 | Contract | Address | Deploy tx |
 | --- | --- | --- |
 | `BankrEscrowV3` | `0x…` | `0x…` |
-| `BankrFeeRightsReceipt` | `0x…` (from `escrow.receipt()` or deploy logs) | *(same deploy as escrow if created in constructor)* |
+| `BankrFeeRightsReceipt` | `0x…` (shared TMPR — same `receipt()` on Bankr + Clanker escrows) | `0x…` |
 | `FeeRightsFixedSale` | `0x…` | `0x…` |
 
-### Verify `BankrEscrowV3` (constructor: `address initialOwner`)
+### One OpenSea collection — match `receipt()` on every escrow
+
+OpenSea groups NFTs by **contract address**. Bankr and Clanker escrows must use the **same** `BankrFeeRightsReceipt` (TMPR) so listings appear under one collection.
+
+After deploy, confirm the addresses match (replace env RPC and escrow addresses):
+
+```bash
+source .env
+TMPR=$(~/.foundry/bin/cast call "$BANKR_ESCROW" "receipt()(address)" --rpc-url "$BASE_MAINNET_RPC_URL")
+echo "Bankr escrow receipt: $TMPR"
+~/.foundry/bin/cast call "$CLANKER_ESCROW" "receipt()(address)" --rpc-url "$BASE_MAINNET_RPC_URL"
+# Clanker v4 add-on:
+# ~/.foundry/bin/cast call "$CLANKER_V4_ESCROW" "receipt()(address)" --rpc-url "$BASE_MAINNET_RPC_URL"
+# All printed receipt addresses must equal $TMPR and your VITE_DEFAULT_RECEIPT_COLLECTION.
+```
+
+### Verify `BankrEscrowV3` (constructor: `address initialOwner`, `address receipt_`)
 
 ```bash
 source .env
 ESCROW=0xYourEscrowV3
 OWNER=0xYourInitialOwner
-CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$OWNER")
+RECEIPT=0xYourTMPR
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address,address)" "$OWNER" "$RECEIPT")
 
 ~/.foundry/bin/forge verify-contract \
   "$ESCROW" \
@@ -208,13 +225,13 @@ CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$OWNER
   --watch
 ```
 
-### Verify `BankrFeeRightsReceipt` (constructor: `address escrow_`)
+### Verify `BankrFeeRightsReceipt` (constructor: `address initialOwner`)
 
 ```bash
 source .env
 RECEIPT=0xYourReceipt
-ESCROW=0xYourEscrowV3
-CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$ESCROW")
+OWNER=0xReceiptOwnerAtDeploy
+CONSTRUCTOR_ARGS=$(~/.foundry/bin/cast abi-encode "constructor(address)" "$OWNER")
 
 ~/.foundry/bin/forge verify-contract \
   "$RECEIPT" \

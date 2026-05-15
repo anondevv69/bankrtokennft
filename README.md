@@ -196,6 +196,8 @@ Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor
 
 Use `script/DeployTokenMarketplace.s.sol` — it deploys all three contracts in one broadcast and wires everything up automatically.
 
+If you already deployed the canonical TMPR (same contract Clanker escrows use) and only need a **new** `BankrEscrowV3` that mints there, use `script/DeployBankrEscrowSharedReceipt.s.sol` with env `TMPR_ADDRESS` (deployer must be TMPR owner to authorize the new escrow). Do **not** run `DeployBankrEscrowV3.s.sol` for that case — it deploys a **separate** receipt = a second OpenSea collection.
+
 **Known addresses (Base mainnet)**
 
 | Contract | Address |

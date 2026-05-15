@@ -14,8 +14,11 @@ Deploy from your machine (or locked-down CI). **Never** put `PRIVATE_KEY` in Rai
 
 | Contract | How |
 | --- | --- |
-| **BankrEscrowV3** + **BankrFeeRightsReceipt** | One script: receipt is created inside the escrow constructor. `DeployBankrEscrowV3` logs **both** addresses. |
-| **FeeRightsFixedSale** | Separate script: `DeployFeeRightsFixedSale`. |
+| **Token Marketplace bundle** (one TMPR + Bankr + Clanker v3 escrows) | **`script/DeployTokenMarketplace.s.sol`** — one shared `BankrFeeRightsReceipt` so Bankr and Clanker mints land in the **same** OpenSea collection (contract address). |
+| **BankrEscrowV3 only (creates a second TMPR)** | `DeployBankrEscrowV3.s.sol` deploys a **new** receipt every run → **second** OpenSea collection. Use only for isolated testnets or when you intentionally want a separate collection. |
+| **BankrEscrowV3 on existing TMPR** | **`script/DeployBankrEscrowSharedReceipt.s.sol`** — pass `TMPR_ADDRESS` = the canonical receipt (same as Clanker’s `escrow.receipt()`). Deployer must own that receipt contract to call `setEscrowAuthorized`. |
+| **ClankerEscrowV4 add-on** | `DeployAddClankerV4.s.sol` with `TMPR_ADDRESS` (see script header). |
+| **FeeRightsFixedSale** | `DeployFeeRightsFixedSale.s.sol` (separate deployment). |
 
 **RPC:** use a **paid** Base mainnet endpoint (Alchemy, QuickNode, Infura, Tenderly, etc.). Do **not** rely on the public default for production deploys or high-traffic reads.
 
@@ -25,13 +28,18 @@ Deploy from your machine (or locked-down CI). **Never** put `PRIVATE_KEY` in Rai
 cd fee-rights-exchange
 source .env   # PRIVATE_KEY, BASE_MAINNET_RPC_URL, ETHERSCAN_API_KEY, etc.
 
-# Dry run (no broadcast)
-forge script script/DeployBankrEscrowV3.s.sol --rpc-url "$BASE_MAINNET_RPC_URL"
-
-forge script script/DeployBankrEscrowV3.s.sol \
+# Preferred — one TMPR for Bankr + Clanker (see README "Deploy Token Marketplace")
+forge script script/DeployTokenMarketplace.s.sol \
   --rpc-url "$BASE_MAINNET_RPC_URL" \
   --private-key "$PRIVATE_KEY" \
   --broadcast
+
+# If you already have the canonical TMPR and only need a new Bankr escrow on it:
+# export TMPR_ADDRESS=0x...   # same as VITE_DEFAULT_RECEIPT_COLLECTION / Clanker receipt()
+# forge script script/DeployBankrEscrowSharedReceipt.s.sol \
+#   --rpc-url "$BASE_MAINNET_RPC_URL" \
+#   --private-key "$PRIVATE_KEY" \
+#   --broadcast
 
 # Then marketplace (separate tx / deployment)
 forge script script/DeployFeeRightsFixedSale.s.sol \
@@ -40,7 +48,7 @@ forge script script/DeployFeeRightsFixedSale.s.sol \
   --broadcast
 ```
 
-Record: escrow address, **receipt** address (`escrow.receipt()`), marketplace address, deployment tx hashes.
+Record: escrow address(es), **receipt** address (`escrow.receipt()` — must match across Bankr and Clanker for one OpenSea collection), marketplace address, deployment tx hashes.
 
 ---
 
@@ -48,13 +56,13 @@ Record: escrow address, **receipt** address (`escrow.receipt()`), marketplace ad
 
 Trust: users should see verified source on [basescan.org](https://basescan.org) (mainnet), not unverified bytecode.
 
-- **BankrEscrowV3** — `constructor(address initialOwner)` (same pattern as V2 in repo docs).
-- **BankrFeeRightsReceipt** — `constructor(address escrow_)` — `escrow_` must be the **deployed escrow** address.
+- **BankrEscrowV3** — `constructor(address initialOwner, BankrFeeRightsReceipt receipt_)` — `receipt_` is the TMPR collection this escrow mints into (immutable).
+- **BankrFeeRightsReceipt** — `constructor(address initialOwner)` — escrows are authorized later via `setEscrowAuthorized` (see deploy scripts).
 - **FeeRightsFixedSale** — no constructor args.
 
 Use `forge verify-contract` with **`--chain 8453`** and your `ETHERSCAN_API_KEY` (same key flow as Sepolia; chain id differs). Fill in real addresses in **`VERIFICATION.md`** under **Base mainnet (production)** once deployed.
 
-**Also verify `BankrFeeRightsReceipt`** (constructor `escrow_` = deployed **`BankrEscrowV3`**) — not only **`FeeRightsFixedSale`**. Explorers + some custodial scanners treat **both** `to` addresses in an `approve` path.
+**Also verify `BankrFeeRightsReceipt`** — not only **`FeeRightsFixedSale`**. Explorers + some custodial scanners treat **both** `to` addresses in an `approve` path.
 
 ### Custodial signing lag (Bankr marketplace)
 

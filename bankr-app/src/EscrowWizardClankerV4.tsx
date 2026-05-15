@@ -44,7 +44,8 @@ async function readV4State(
   locker: Address,
   token: Address,
   user: Address,
-  savedRewardIndex: bigint | null,
+  /** Prefer this index when still valid (wizard session or row-selected split). */
+  stickyRewardIndex: bigint | null,
 ): Promise<NextAction> {
   const [rewardsRaw, allowed] = await Promise.all([
     client.readContract({
@@ -95,7 +96,17 @@ async function readV4State(
     const admins = info.rewardAdmins;
     const recipients = info.rewardRecipients;
 
-    if (savedRewardIndex !== null) return savedRewardIndex;
+    const trySticky = (idx: bigint | null): bigint | null => {
+      if (idx === null) return null;
+      const i = Number(idx);
+      if (!Number.isFinite(i) || i < 0 || i >= admins.length) return null;
+      const adm = (admins[i] ?? zero).toLowerCase();
+      if (adm === u || adm === esc) return BigInt(i);
+      return null;
+    };
+
+    const pinned = trySticky(stickyRewardIndex);
+    if (pinned !== null) return pinned;
 
     // User is still admin (pre-transfer or mid-transfer, any recipient)
     for (let i = 0; i < admins.length; i++) {
@@ -202,6 +213,14 @@ async function waitAndRefresh(
   return last;
 }
 
+function readPinnedRowIndex(row: Record<string, unknown>): bigint | null {
+  const v = row.__clankerEscrowRewardIndex;
+  if (typeof v === "bigint") return v;
+  if (typeof v === "number" && Number.isInteger(v) && v >= 0) return BigInt(v);
+  if (typeof v === "string" && /^\d+$/.test(v)) return BigInt(v);
+  return null;
+}
+
 // ── Stepper UI ────────────────────────────────────────────────────────────────
 
 function V4Stepper({ step }: { step: 1 | 2 | 3 | 4 }) {
@@ -263,7 +282,8 @@ export function EscrowWizardClankerV4({
   const [busy, setBusy] = useState(false);
 
   // Persist discovered reward index across refreshes within this wizard session.
-  const [savedRewardIndex, setSavedRewardIndex] = useState<bigint | null>(null);
+  // Initialise from row when listing a specific split (`__clankerEscrowRewardIndex`).
+  const [savedRewardIndex, setSavedRewardIndex] = useState<bigint | null>(() => readPinnedRowIndex(row));
 
   const [locker, setLocker] = useState<Address | null>(null);
 
@@ -453,7 +473,7 @@ export function EscrowWizardClankerV4({
         chainId: MVP_CHAIN_ID,
       });
       await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
-      setSavedRewardIndex(null);
+      setSavedRewardIndex(readPinnedRowIndex(row));
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "cancelPendingDeposit failed");
@@ -486,6 +506,13 @@ export function EscrowWizardClankerV4({
         <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.65rem" }}>
           <strong>{label}</strong> — four Base transactions: prepare on escrow, redirect fees to escrow on the
           Clanker v4 locker, transfer admin to escrow, then finalize to mint your TMPR receipt NFT.
+          {readPinnedRowIndex(row) !== null && (
+            <> One TMPR covers <strong>reward index #{readPinnedRowIndex(row)!.toString()}</strong> only; other splits stay on-chain until you list them separately.</>
+          )}
+        </p>
+
+        <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.65rem", lineHeight: 1.5, padding: "0.5rem 0.6rem", borderRadius: "8px", border: "1px solid rgba(251, 146, 60, 0.25)", background: "rgba(251, 146, 60, 0.06)" }}>
+          <strong>Changing rewards on Clanker?</strong> v4 often pays both the launch <strong>token</strong> and <strong>WETH</strong> as separate reward indices. If you sell fee rights here, you must transfer <strong>reward admin</strong> (and redirect fees) for <em>each</em> index you care about — otherwise you may still earn on one leg while escrowing another.
         </p>
 
         {wrongChain && (
