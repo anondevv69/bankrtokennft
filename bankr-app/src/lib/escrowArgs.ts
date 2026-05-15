@@ -31,7 +31,7 @@ export function normalizePoolId(raw: unknown): Hex | null {
 
 /** Launched ERC-20 from a Bankr `creator-fees` / launches row (field names vary). */
 export function rowLaunchedToken(row: Record<string, unknown>): Address | null {
-  for (const k of ["tokenAddress", "contractAddress", "ca", "mint", "contract", "token"]) {
+  for (const k of ["tokenAddress", "contract_address", "contractAddress", "ca", "mint", "contract", "token"]) {
     const v = row[k];
     if (typeof v !== "string" || !v.startsWith("0x") || !isAddress(v, { strict: false })) continue;
     try {

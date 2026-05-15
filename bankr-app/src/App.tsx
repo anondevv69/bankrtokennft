@@ -40,6 +40,7 @@ import {
   normalizeLaunchedTicker,
   normalizePoolId,
   rowPoolIdHex,
+  rowLaunchedToken,
   launchRowLabel,
   launchedTokenFromWethPair,
   WETH_BASE,
@@ -218,7 +219,55 @@ function extractBankrLaunchRows(data: unknown): Record<string, unknown>[] {
   return walk(data)?.filter((x) => x && typeof x === "object") ?? [];
 }
 
+/** Clanker public `search-creator` — tokens[] only (no Doppler bytes32 pool id). */
+function normalizeClankerSearchRows(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== "object") return [];
+  const tokens = (data as Record<string, unknown>).tokens;
+  if (!Array.isArray(tokens)) return [];
+  const out: Record<string, unknown>[] = [];
+  for (const t of tokens) {
+    if (!t || typeof t !== "object") continue;
+    const o = t as Record<string, unknown>;
+    const ca = o.contract_address;
+    if (typeof ca !== "string" || !ca.startsWith("0x")) continue;
+    out.push({
+      ...o,
+      tokenAddress: ca,
+      __launchVenue: "Clanker",
+    });
+  }
+  return out;
+}
+
+/** Dedupe by launched token; keep Bankr-style rows first (usually carry `poolId`). Append Clanker-only extras. */
+function mergeCreatorFeeRows(
+  bankr: Record<string, unknown>[],
+  clanker: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const seen = new Set<string>();
+  const merged: Record<string, unknown>[] = [];
+  for (const r of bankr) {
+    const ta = rowLaunchedToken(r);
+    if (ta) seen.add(ta.toLowerCase());
+    merged.push(r);
+  }
+  for (const r of clanker) {
+    const ta = rowLaunchedToken(r);
+    if (!ta) continue;
+    const k = ta.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(r);
+  }
+  return merged;
+}
+
 function launchRowHref(row: Record<string, unknown>, wallet: string): string {
+  const venue = row.__launchVenue;
+  const taResolved = rowLaunchedToken(row);
+  if (venue === "Clanker" && taResolved) {
+    return `https://basescan.org/token/${encodeURIComponent(getAddress(taResolved))}`;
+  }
   const url = row.url ?? row.href ?? row.link;
   if (typeof url === "string" && url.startsWith("http")) return url;
   const ta = row.tokenAddress;
@@ -929,10 +978,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
   const headline = launchedSymbol
     ? `${launchedSymbol} fee rights`
     : tickerLine || metaName || "Fee rights receipt";
-  const subline = [
-    serialLabel ? `CFR #${serialLabel}` : null,
-    factoryName && factoryName.toLowerCase() !== "bankr" ? factoryName : factoryName ? "Bankr" : null,
-  ]
+  const subline = [serialLabel ? `CFR #${serialLabel}` : null, factoryName]
     .filter(Boolean)
     .join(" · ");
 
@@ -1956,25 +2002,48 @@ export default function App() {
     setBankrLoading(true);
     setBankrErr(null);
     try {
-      const res = await fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`);
-      const json = (await res.json()) as {
+      const [bankrRes, clankerRes] = await Promise.all([
+        fetch(`/api/bankr-launches?q=${encodeURIComponent(address)}`),
+        fetch(
+          `/api/clanker-search-creator?q=${encodeURIComponent(address)}&limit=50&sort=desc`,
+        ),
+      ]);
+
+      const bankrJson = (await bankrRes.json()) as {
         ok?: boolean;
         error?: string;
         hint?: string;
         data?: unknown;
       };
-      if (!json.ok) {
+
+      if (!bankrJson.ok) {
         setBankrErr(
-          [json.error, json.hint].filter(Boolean).join(" — ") || `HTTP ${res.status}`,
+          [bankrJson.error, bankrJson.hint].filter(Boolean).join(" — ") || `HTTP ${bankrRes.status}`,
         );
         return;
       }
-      setBankrRows(extractBankrLaunchRows(json.data));
+
+      const bankrRowsLocal = extractBankrLaunchRows(bankrJson.data);
+
+      let clankerRows: Record<string, unknown>[] = [];
+      try {
+        const clankerJson = (await clankerRes.json()) as {
+          ok?: boolean;
+          data?: unknown;
+        };
+        if (clankerJson.ok && clankerJson.data) {
+          clankerRows = normalizeClankerSearchRows(clankerJson.data);
+        }
+      } catch {
+        /* Clanker supplement only — ignore parse failures */
+      }
+
+      setBankrRows(mergeCreatorFeeRows(bankrRowsLocal, clankerRows));
     } catch (e) {
       setBankrErr(
         e instanceof Error
           ? e.message
-          : "Could not reach /api/bankr-launches (deploy on Vercel or run vercel dev).",
+          : "Could not reach launch APIs (deploy on Vercel or run vercel dev).",
       );
     } finally {
       setBankrLoading(false);
@@ -2258,8 +2327,16 @@ export default function App() {
                       Tokens that could be listed
                       <InfoTip label="About this list">
                         <p>
-                          Rows come from your connected wallet’s fee data. <strong>List</strong> starts the on-chain flow
-                          so an NFT can show up under “NFTs in your wallet.”
+                          Rows merge Bankr creator-fees data with{" "}
+                          <a
+                            href="https://clanker.gitbook.io/documentation/public/get-tokens-by-creator"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Clanker creator search
+                          </a>
+                          . <strong>List</strong> needs a Doppler-style bytes32 pool id (usually from Bankr-indexed rows);
+                          Clanker-only rows link to BaseScan — use <strong>advanced</strong> to paste pool id when needed.
                         </p>
                       </InfoTip>
                     </h2>
@@ -2272,7 +2349,9 @@ export default function App() {
                       {refreshBusy ? <><span className="spinner" />Refreshing…</> : "Refresh"}
                     </button>
                   </div>
-                  <p className="muted one-liner">Tokens we found for your wallet. Use <strong>List</strong> to continue.</p>
+                  <p className="muted one-liner">
+                    Tokens we found for your wallet (Bankr + Clanker). <strong>List</strong> when the row includes a pool id.
+                  </p>
                   {idsForWatch.length > 0 && !bfrrDedupeReady && (
                     <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
                       Matching rows to NFTs you already hold…
@@ -2284,6 +2363,7 @@ export default function App() {
                         const ta = row.tokenAddress;
                         const pid = row.poolId;
                         const poolHex = rowPoolIdHex(row);
+                        const poolReady = Boolean(poolHex);
                         const key =
                           typeof ta === "string" && ta.startsWith("0x")
                             ? ta.toLowerCase()
@@ -2294,7 +2374,14 @@ export default function App() {
                           <li key={key}>
                             <div className="bankr-panel__row">
                               <div className="bankr-panel__col">
-                                <span className="bankr-panel__name">{launchRowLabel(row)}</span>
+                                <span className="bankr-panel__name">
+                                  {launchRowLabel(row)}
+                                  {row.__launchVenue === "Clanker" && !poolReady ? (
+                                    <span className="muted" style={{ marginLeft: "0.35rem", fontSize: "0.78rem" }}>
+                                      · Clanker
+                                    </span>
+                                  ) : null}
+                                </span>
                                 {poolHex && (
                                   <div className="bankr-panel__sub mono" title={poolHex}>
                                     Pool {poolHex.slice(0, 10)}…{poolHex.slice(-8)}
@@ -2313,7 +2400,12 @@ export default function App() {
                               <button
                                 type="button"
                                 className="bankr-panel__mint btn btn-ghost btn-sm"
-                                disabled={wrongNetwork}
+                                disabled={wrongNetwork || !poolReady}
+                                title={
+                                  poolReady
+                                    ? undefined
+                                    : "Pool id missing — use advanced paste or a Bankr-indexed row with pool id."
+                                }
                                 onClick={() => setEscrowWizardRow(row)}
                               >
                                 List

@@ -6,7 +6,7 @@ import { MVP_CHAIN, MVP_CHAIN_ID } from "./chain";
 import { ensureBaseChain } from "./ensureBase";
 import { bankrEscrowAbi } from "./lib/bankrEscrowAbi";
 import { bankrFeesMinimalAbi } from "./lib/bankrFeesMinimalAbi";
-import { inferToken0Token1, normalizePoolId, rowLaunchedToken, launchRowLabel } from "./lib/escrowArgs";
+import { inferToken0Token1, rowLaunchedToken, launchRowLabel, rowPoolIdHex } from "./lib/escrowArgs";
 
 export type EscrowWizardProps = {
   row: Record<string, unknown>;
@@ -208,7 +208,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     if (!publicClient) return;
     setErr(null);
     setNext({ kind: "loading" });
-    const pid = normalizePoolId(row.poolId);
+    const pid = rowPoolIdHex(row);
     const launched = rowLaunchedToken(row);
     if (!pid || !launched) {
       setNext({ kind: "blocked", reason: "This row is missing a valid poolId or tokenAddress from launch data." });

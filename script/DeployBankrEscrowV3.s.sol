@@ -16,7 +16,8 @@ import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 ///                              **Note:** Foundry auto-loads `fee-rights-exchange/.env`; unset or comment out
 ///                              `ESCROW_INITIAL_OWNER` there if you want the deployer to remain owner.
 ///      INITIAL_FEE_MANAGERS  — comma-separated list of fee manager addresses to allowlist
-///      FACTORY_NAME          — display name baked into NFT images (default: "Bankr")
+///      FACTORY_NAME          — display name baked into NFT metadata at finalize for **every** address in INITIAL_FEE_MANAGERS (default: "Bankr").
+///                              Use escrow `setFactoryName(manager, "Clanker")` after deploy when CSV mixes factories under different venues.
 ///
 ///      Production (Base mainnet):
 ///        export FACTORY_NAME="Bankr"

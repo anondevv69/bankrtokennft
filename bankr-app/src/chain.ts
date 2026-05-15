@@ -1,6 +1,6 @@
 import { base } from "wagmi/chains";
 
-/** MVP: Base mainnet only (real Bankr assets). Other chains are not supported in this build. */
+/** MVP: Base mainnet only (fee-manager–compatible launches). Other chains are not supported in this build. */
 export const MVP_CHAIN = base;
 export const MVP_CHAIN_ID = base.id;
 

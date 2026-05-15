@@ -10,7 +10,7 @@ const rpc =
 
 if (typeof import.meta.env.DEV !== "undefined" && import.meta.env.DEV && rpc.includes("mainnet.base.org")) {
   console.warn(
-    "[bankr-app] VITE_RPC_URL is unset or points at mainnet.base.org — receipt scans may hit rate limits. Use a dedicated Base RPC in bankr-app/.env.",
+    "[token-marketplace] VITE_RPC_URL is unset or points at mainnet.base.org — receipt scans may hit rate limits. Use a dedicated Base RPC in bankr-app/.env.",
   );
 }
 
@@ -28,8 +28,8 @@ const walletConnectConnector = walletConnectConfigured
   ? walletConnect({
       projectId: wcProjectIdRaw,
       metadata: {
-        name: "Bankr sale",
-        description: "Bankr fee rights — Base",
+        name: "Token Marketplace",
+        description: "Creator fee rights — Base",
         url: typeof window !== "undefined" ? window.location.origin : "https://localhost",
         icons: [],
       },
@@ -44,7 +44,7 @@ const walletConnectConnector = walletConnectConfigured
 const connectors = [
   metaMask(),
   ...(walletConnectConnector ? [walletConnectConnector] : []),
-  coinbaseWallet({ appName: "Bankr sale" }),
+  coinbaseWallet({ appName: "Token Marketplace" }),
   injected({ shimDisconnect: true }),
 ];
 

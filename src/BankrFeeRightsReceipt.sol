@@ -103,10 +103,12 @@ contract BankrFeeRightsReceipt is ERC721 {
         string memory head = string.concat(
             '{"name":"Creator Fee Rights #',
             sSerial,
-            '",',
-            '"description":"',
+            " - ",
             _safe(fact),
-            " creator fee rights on Base: ",
+            '",',
+            '"description":"Launch factory: ',
+            _safe(fact),
+            ". Creator fee rights on Base for ",
             _safe(ticker),
             " (",
             _safe(tokenName),
@@ -124,7 +126,7 @@ contract BankrFeeRightsReceipt is ERC721 {
             '{"trait_type":"Serial","value":',
             sSerial,
             "},",
-            '{"trait_type":"Factory","value":"',
+            '{"trait_type":"Launch factory","value":"',
             _safe(fact),
             '"},',
             '{"trait_type":"Ticker","value":"',
@@ -162,7 +164,7 @@ contract BankrFeeRightsReceipt is ERC721 {
             _svgDefs(),
             _svgFrame(fact),
             _svgHeader(sSerial, ticker, tokenName),
-            _svgBody(pos, sSerial, compactLayout),
+            _svgBody(pos, sSerial, compactLayout, fact),
             "</svg>"
         );
     }
@@ -191,7 +193,8 @@ contract BankrFeeRightsReceipt is ERC721 {
             '<rect x="1" y="1" width="418" height="298" rx="19" fill="none" stroke="#3f3f46" stroke-opacity="0.85" stroke-width="1"/>',
             '<rect x="18" y="48" width="384" height="236" rx="16" fill="#09090b" stroke="#f97316" stroke-opacity="0.25" stroke-width="1"/>',
             '<rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#fdba74" stroke-opacity="0.45"/>',
-            '<text x="336" y="77" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">',
+            '<text x="336" y="56" font-family="ui-monospace,monospace" font-size="8" fill="#a1a1aa" text-anchor="middle" font-weight="600" letter-spacing="0.06">LAUNCH</text>',
+            '<text x="336" y="76" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">',
             _toUpper(fact),
             "</text>"
         );
@@ -233,14 +236,29 @@ contract BankrFeeRightsReceipt is ERC721 {
         );
     }
 
-    function _svgBody(Position memory pos, string memory sSerial, bool compact) private pure returns (string memory) {
-        string memory yPool = compact ? "210" : "218";
-        string memory ySell = compact ? "234" : "242";
-        string memory yFee = compact ? "258" : "266";
+    function _svgBody(Position memory pos, string memory sSerial, bool compact, string memory fact)
+        private
+        pure
+        returns (string memory)
+    {
+        if (compact) {
+            return string.concat(
+                _svgRow("210", "LAUNCH", _safe(fact)),
+                _svgRow("228", "POOL ID", _shortB32(pos.poolId)),
+                _svgRow("246", "SELLER", _shortAddr(pos.seller)),
+                _svgRow("264", "FEE MGR", _shortAddr(pos.feeManager)),
+                '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
+                '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Creator fee rights - Base mainnet</text>',
+                '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
+                sSerial,
+                "</text>"
+            );
+        }
         return string.concat(
-            _svgRow(yPool, "POOL ID", _shortB32(pos.poolId)),
-            _svgRow(ySell, "SELLER", _shortAddr(pos.seller)),
-            _svgRow(yFee, "FEE MGR", _shortAddr(pos.feeManager)),
+            _svgRow("212", "LAUNCH", _safe(fact)),
+            _svgRow("230", "POOL ID", _shortB32(pos.poolId)),
+            _svgRow("248", "SELLER", _shortAddr(pos.seller)),
+            _svgRow("266", "FEE MGR", _shortAddr(pos.feeManager)),
             '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
             '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Creator fee rights - Base mainnet</text>',
             '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
