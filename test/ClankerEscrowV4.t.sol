@@ -285,4 +285,98 @@ contract ClankerEscrowV4Test is Test {
         vm.expectRevert(abi.encodeWithSelector(ClankerEscrowV4.RightsAlreadyEscrowed.selector, key));
         escrow.prepareDeposit(address(locker), CLANKER_TOKEN, REWARD_INDEX, TOKEN0, TOKEN1);
     }
+
+    // ── New tests for recipient-restoration and third-party recipient ──────────
+
+    address private constant THIRD_PARTY_RECIPIENT = address(0xFEEF33);
+    // Use a separate token address so setUp's seed doesn't interfere with index 0.
+    address private constant CLANKER_TOKEN_B = address(0xC3);
+
+    /// @notice Cancel when only recipient was transferred: escrow cannot restore recipient
+    ///         (it's not admin). Seller keeps admin and must fix recipient manually.
+    function testCancelAfterRecipientOnlyTransferDoesNotRestoreRecipient() public {
+        locker.seed(CLANKER_TOKEN_B, TOKEN0, TOKEN1, SELLER, THIRD_PARTY_RECIPIENT);
+
+        vm.prank(SELLER);
+        escrow.prepareDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX, TOKEN0, TOKEN1);
+
+        vm.prank(SELLER);
+        locker.updateRewardRecipient(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+
+        vm.prank(SELLER);
+        escrow.cancelPendingDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+
+        IClankerLockerV4.TokenRewardInfo memory info = locker.tokenRewards(CLANKER_TOKEN_B);
+        assertEq(info.rewardAdmins[REWARD_INDEX], SELLER, "admin should remain seller");
+        // Recipient is still escrow — seller must manually call updateRewardRecipient.
+        assertEq(info.rewardRecipients[REWARD_INDEX], address(escrow), "recipient cannot be auto-restored without escrow holding admin");
+
+        // Seller (still admin) can manually restore the recipient.
+        vm.prank(SELLER);
+        locker.updateRewardRecipient(CLANKER_TOKEN_B, REWARD_INDEX, THIRD_PARTY_RECIPIENT);
+        info = locker.tokenRewards(CLANKER_TOKEN_B);
+        assertEq(info.rewardRecipients[REWARD_INDEX], THIRD_PARTY_RECIPIENT, "seller can restore recipient manually");
+    }
+
+    /// @notice Cancel after both roles transferred restores admin to seller + original recipient.
+    function testCancelAfterFullTransferRestoresRoles() public {
+        locker.seed(CLANKER_TOKEN_B, TOKEN0, TOKEN1, SELLER, THIRD_PARTY_RECIPIENT);
+
+        vm.prank(SELLER);
+        escrow.prepareDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX, TOKEN0, TOKEN1);
+        vm.prank(SELLER);
+        locker.updateRewardRecipient(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+        vm.prank(SELLER);
+        locker.updateRewardAdmin(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+
+        vm.prank(SELLER);
+        escrow.cancelPendingDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+
+        IClankerLockerV4.TokenRewardInfo memory info = locker.tokenRewards(CLANKER_TOKEN_B);
+        assertEq(info.rewardAdmins[REWARD_INDEX], SELLER, "admin should be restored to seller");
+        assertEq(info.rewardRecipients[REWARD_INDEX], THIRD_PARTY_RECIPIENT, "recipient should be restored to original");
+
+        bytes32 key = escrow.keyFor(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+        assertEq(escrow.pendingSeller(key), address(0), "pending seller should be cleared");
+    }
+
+    /// @notice Full deposit succeeds when original recipient is a third party.
+    function testDepositWithThirdPartyRecipientSucceeds() public {
+        locker.seed(CLANKER_TOKEN_B, TOKEN0, TOKEN1, SELLER, THIRD_PARTY_RECIPIENT);
+
+        vm.prank(SELLER);
+        escrow.prepareDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX, TOKEN0, TOKEN1);
+        vm.prank(SELLER);
+        locker.updateRewardRecipient(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+        vm.prank(SELLER);
+        locker.updateRewardAdmin(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+        vm.prank(SELLER);
+        uint256 tokenId = escrow.finalizeDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+
+        assertEq(tmpr.ownerOf(tokenId), SELLER);
+        bytes32 key = escrow.keyFor(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+        assertTrue(escrow.isEscrowed(key));
+    }
+
+    /// @notice Emergency restore by owner fixes stuck pending deposit.
+    function testEmergencyRestorePendingDeposit() public {
+        locker.seed(CLANKER_TOKEN_B, TOKEN0, TOKEN1, SELLER, THIRD_PARTY_RECIPIENT);
+
+        vm.prank(SELLER);
+        escrow.prepareDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX, TOKEN0, TOKEN1);
+        vm.prank(SELLER);
+        locker.updateRewardRecipient(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+        vm.prank(SELLER);
+        locker.updateRewardAdmin(CLANKER_TOKEN_B, REWARD_INDEX, address(escrow));
+
+        vm.prank(ADMIN);
+        escrow.emergencyRestorePendingDeposit(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+
+        IClankerLockerV4.TokenRewardInfo memory info = locker.tokenRewards(CLANKER_TOKEN_B);
+        assertEq(info.rewardAdmins[REWARD_INDEX], SELLER);
+        assertEq(info.rewardRecipients[REWARD_INDEX], THIRD_PARTY_RECIPIENT);
+
+        bytes32 key = escrow.keyFor(address(locker), CLANKER_TOKEN_B, REWARD_INDEX);
+        assertEq(escrow.pendingSeller(key), address(0));
+    }
 }

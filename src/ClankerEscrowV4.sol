@@ -52,6 +52,9 @@ contract ClankerEscrowV4 is Ownable, ReentrancyGuard {
     mapping(bytes32 key => bool) public isSettled;
     mapping(bytes32 key => address) public feeRecipientForKey;
 
+    /// @notice Stores the original fee recipient at deposit time so it can be restored on cancel.
+    mapping(bytes32 key => address) public originalRecipientForKey;
+
     // ── Events ────────────────────────────────────────────────────────────────
 
     event LockerAllowlistUpdated(address indexed locker, bool allowed);
@@ -156,6 +159,8 @@ contract ClankerEscrowV4 is Ownable, ReentrancyGuard {
         rewardIndexForKey[key] = rewardIndex;
         token0ForKey[key] = token0;
         token1ForKey[key] = token1;
+        // Store original recipient so cancelPendingDeposit can restore it.
+        originalRecipientForKey[key] = info.rewardRecipients[rewardIndex];
 
         emit DepositPrepared(key, locker, token, rewardIndex, msg.sender);
     }
@@ -206,13 +211,65 @@ contract ClankerEscrowV4 is Ownable, ReentrancyGuard {
     }
 
     /// @notice Cancel a pending (not yet finalized) deposit.
+    ///         If the escrow already holds admin or recipient rights on the locker,
+    ///         they are restored: admin → seller, recipient → original recipient recorded at prepare time.
     function cancelPendingDeposit(address locker, address token, uint256 rewardIndex) external nonReentrant {
         bytes32 key = keyFor(locker, token, rewardIndex);
         address seller = pendingSeller[key];
         if (seller == address(0)) revert DepositNotPrepared(key);
         if (msg.sender != seller) revert UnauthorizedCaller(msg.sender);
 
-        // Also clean up the position fields since finalize will never be called.
+        // Restore locker roles where possible.
+        // `updateRewardRecipient` can only be called by the current admin.
+        // So restore recipient FIRST (while escrow is still admin), then restore admin.
+        IClankerLockerV4.TokenRewardInfo memory info = IClankerLockerV4(locker).tokenRewards(token);
+        address originalRecipient = originalRecipientForKey[key];
+        if (originalRecipient == address(0)) originalRecipient = seller;
+        bool escrowIsAdmin = rewardIndex < info.rewardAdmins.length && info.rewardAdmins[rewardIndex] == address(this);
+        bool escrowIsRecipient = rewardIndex < info.rewardRecipients.length && info.rewardRecipients[rewardIndex] == address(this);
+        if (escrowIsAdmin && escrowIsRecipient) {
+            // Fully transferred — restore recipient first, then hand admin back to seller.
+            IClankerLockerV4(locker).updateRewardRecipient(token, rewardIndex, originalRecipient);
+            IClankerLockerV4(locker).updateRewardAdmin(token, rewardIndex, seller);
+        } else if (escrowIsAdmin) {
+            // Only admin was transferred — restore admin; seller can fix recipient themselves.
+            IClankerLockerV4(locker).updateRewardAdmin(token, rewardIndex, seller);
+        }
+        // If escrow is recipient but not admin: escrow cannot call updateRewardRecipient.
+        // Seller is still admin and must manually call updateRewardRecipient to fix.
+
+        // Clean up all position fields since finalize will never be called.
+        delete lockerForKey[key];
+        delete clankerTokenForKey[key];
+        delete rewardIndexForKey[key];
+        _clearPendingDeposit(key);
+        emit PendingDepositCancelled(key, seller);
+    }
+
+    /// @notice Owner-only emergency restore for a stuck pending deposit where the escrow
+    ///         acquired locker roles but the deposit was never finalized or cancelled normally.
+    ///         Restores admin → seller, recipient → original recipient, and clears escrow state.
+    function emergencyRestorePendingDeposit(
+        address locker,
+        address token,
+        uint256 rewardIndex
+    ) external onlyOwner nonReentrant {
+        bytes32 key = keyFor(locker, token, rewardIndex);
+        address seller = pendingSeller[key];
+        if (seller == address(0)) revert DepositNotPrepared(key);
+
+        IClankerLockerV4.TokenRewardInfo memory info = IClankerLockerV4(locker).tokenRewards(token);
+        address originalRecipient = originalRecipientForKey[key];
+        if (originalRecipient == address(0)) originalRecipient = seller;
+        bool escrowIsAdminE = rewardIndex < info.rewardAdmins.length && info.rewardAdmins[rewardIndex] == address(this);
+        bool escrowIsRecipientE = rewardIndex < info.rewardRecipients.length && info.rewardRecipients[rewardIndex] == address(this);
+        if (escrowIsAdminE && escrowIsRecipientE) {
+            IClankerLockerV4(locker).updateRewardRecipient(token, rewardIndex, originalRecipient);
+            IClankerLockerV4(locker).updateRewardAdmin(token, rewardIndex, seller);
+        } else if (escrowIsAdminE) {
+            IClankerLockerV4(locker).updateRewardAdmin(token, rewardIndex, seller);
+        }
+
         delete lockerForKey[key];
         delete clankerTokenForKey[key];
         delete rewardIndexForKey[key];
@@ -304,8 +361,11 @@ contract ClankerEscrowV4 is Ownable, ReentrancyGuard {
         // Only clear the pending marker and per-deposit token pair.
         // lockerForKey / clankerTokenForKey / rewardIndexForKey are intentionally kept:
         // they become the escrowed position record read by redeemRights / releaseRights / cancelRights.
+        // originalRecipientForKey is cleared separately by callers (cancel clears it immediately;
+        // finalize doesn't need it after this point).
         delete pendingSeller[key];
         delete token0ForKey[key];
         delete token1ForKey[key];
+        delete originalRecipientForKey[key];
     }
 }

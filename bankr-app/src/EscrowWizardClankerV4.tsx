@@ -85,9 +85,11 @@ async function readV4State(
   // --- Find effective reward index ---
   // Priority order:
   //   1. savedRewardIndex (from prior step in this session)
-  //   2. index where user is current admin (pre-transfer)
+  //   2. index where user is current admin (pre-transfer, regardless of recipient)
   //   3. index where user is admin and escrow is recipient (after updateRewardRecipient)
   //   4. index where escrow is both admin and recipient (after updateRewardAdmin)
+  //   5. index where escrow is admin but recipient ≠ escrow (stuck — admin transferred
+  //      before recipient was redirected)
 
   const findIndex = (): bigint | null => {
     const admins = info.rewardAdmins;
@@ -95,16 +97,14 @@ async function readV4State(
 
     if (savedRewardIndex !== null) return savedRewardIndex;
 
-    // User is still admin (pre-transfer or mid-transfer)
+    // User is still admin (pre-transfer or mid-transfer, any recipient)
     for (let i = 0; i < admins.length; i++) {
       if (admins[i].toLowerCase() === u) return BigInt(i);
     }
 
-    // Escrow has both admin + recipient (waiting for finalize or already escrowed)
+    // Escrow is admin (fully transferred, or partially stuck)
     for (let i = 0; i < admins.length; i++) {
-      if (admins[i].toLowerCase() === esc && recipients[i].toLowerCase() === esc) {
-        return BigInt(i);
-      }
+      if (admins[i].toLowerCase() === esc) return BigInt(i);
     }
 
     return null;
@@ -161,8 +161,18 @@ async function readV4State(
   if (currentAdmin === u && currentRecipient === esc) {
     return { kind: "transfer_admin", rewardIndex, token0, token1 };
   }
-  if (currentAdmin === u && currentRecipient === u) {
+  // User is admin — redirect fee recipient to escrow regardless of who the current
+  // recipient is (the original recipient might be a fee-split address, not the user).
+  if (currentAdmin === u) {
     return { kind: "transfer_recipient", rewardIndex, token0, token1 };
+  }
+  // Escrow is admin but recipient was not redirected first (steps run out of order).
+  // The escrow contract's cancelPendingDeposit will restore both roles.
+  if (currentAdmin === esc && currentRecipient !== esc) {
+    return {
+      kind: "blocked",
+      reason: `Admin was transferred before fee recipient was redirected. Click "Cancel deposit" to recover — the escrow will restore your admin rights automatically.`,
+    };
   }
 
   return {
@@ -543,7 +553,8 @@ export function EscrowWizardClankerV4({
             <V4Stepper step={2} />
             <p className="escrow-wizard__done">Step 1 complete.</p>
             <p className="escrow-wizard__lead">
-              Step <strong>2 of 4</strong> — call the Clanker v4 locker to redirect fee recipient to the escrow.
+              Step <strong>2 of 4</strong> — redirect the fee recipient to the escrow contract. The current recipient
+              will be restored when the NFT is redeemed or the deposit is cancelled.
             </p>
             <button
               type="button"
