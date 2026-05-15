@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {BankrFeeRightsReceipt} from "../src/BankrFeeRightsReceipt.sol";
 import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 
 /// @title DeployBankrEscrowV3
@@ -41,12 +42,15 @@ contract DeployBankrEscrowV3 is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Ownable owner must be the broadcaster until allowlist/setup finishes.
-        escrow = new BankrEscrowV3(deployer);
+        // Deploy shared receipt first, then escrow, then authorize escrow.
+        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(deployer);
+        escrow = new BankrEscrowV3(deployer, tmpr);
+        tmpr.setEscrowAuthorized(address(escrow), true);
 
         _allowlistFeeManagers(escrow, feeManagersCsv, factoryName);
 
         if (finalOwner != deployer) {
+            tmpr.transferOwnership(finalOwner);
             escrow.transferOwnership(finalOwner);
             console2.log("  Ownership transferred to final owner");
         }

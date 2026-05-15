@@ -190,38 +190,41 @@ prepareDeposit → updateBeneficiary → finalizeDeposit (mints receipt) → opt
 
 Receipt id: `uint256(keccak256(abi.encode(feeManager, poolId)))` via `tokenIdFor` on escrow.
 
-### Deploy `BankrEscrowV3` on Base mainnet (production redeploy)
+### Deploy Token Marketplace contracts (production redeploy)
 
-`BankrEscrowV3` **creates** `BankrFeeRightsReceipt` in its constructor, so one broadcast gives **two** addresses: **escrow** and **receipt NFT (`TMPR` — Token Marketplace)**. Redeploy when you want new on-chain SVG/metadata (e.g. venue labels, art); **existing** receipts on an old collection **stay** on that contract — optionally keep the old receipt address in `VITE_RECEIPT_COLLECTION_ALIASES` so the app still scans legacy NFTs.
+**Architecture:** one shared `BankrFeeRightsReceipt` (TMPR) NFT collection + two escrows — `BankrEscrowV3` (Bankr tokens) and `ClankerEscrowV1` (Clanker tokens). Both escrows mint into the **same** TMPR collection so all fee-rights NFTs appear on **one** OpenSea page. Every NFT has a `"Launch factory": "Bankr"` or `"Clanker"` trait for filtering. Clanker tokens use a different deposit flow (seller transfers `creator.admin` instead of calling `updateBeneficiary`).
 
-To support **both Bankr and Clanker** fee routes on one escrow, set `INITIAL_FEE_MANAGERS` to **both** fee-manager contract addresses on Base (comma-separated). Default `FACTORY_NAME` applies to all at deploy; call **`setFactoryName(clankerFeeManager, "Clanker")`** as escrow owner so new receipts show **Clanker** in metadata (Bankr managers stay **`FACTORY_NAME`** e.g. `"Bankr"`).
+Use `script/DeployTokenMarketplace.s.sol` — it deploys all three contracts in one broadcast and wires everything up automatically.
 
-**1. Pick fee managers**
+**Known addresses (Base mainnet)**
 
-Set `INITIAL_FEE_MANAGERS` to the **actual** Bankr (or compatible `IBankrFees`) fee manager contract(s) used on **Base mainnet** for pools you care about. Wrong addresses ⇒ `prepareDeposit` will fail `FeeManagerNotAllowed` or `getShares` will not match. Verify per pool if unsure (same rules as in `skills/bankr-fee-rights`).
-
-**2. Simulate, then broadcast**
-
-Foundry automatically loads **`fee-rights-exchange/.env`**. If that file sets `ESCROW_INITIAL_OWNER` to your multisig, the script will **transfer escrow ownership** to that address after allowlisting. To keep the deployer as owner, remove or comment out `ESCROW_INITIAL_OWNER` for this run.
+| Contract | Address |
+|---|---|
+| Bankr fee manager | `0xbdf938149ac6a781f94faa0ed45e6a0e984c6544` |
+| Clanker LpLockerv2 v3.1 | `0x33e2Eda238edcF470309b8c6D228986A1204c8f9` |
 
 **Important**
+- Addresses must be exact `0x` + 40 hex characters each (comma-separated, no spaces).
+- **zsh:** paste commands without trailing `#` comments — zsh will error on bare `#`.
 
-- **`INITIAL_FEE_MANAGERS` must be real Base mainnet contracts** — exact **`0x` + 40 hex characters** each (comma-separated, no spaces unless quoted). Strings like `0xYourFeeManager1` are placeholders and **will revert** in `vm.parseAddress`.
-- **zsh:** if you paste lines that start with `#`, zsh may try to run them (`command not found: #`). Put comments on their own line after commands, or omit comments when pasting into the terminal.
-- **Bankr + Clanker:** allowlist **both** fee manager addresses in one CSV if both implement the same `IBankrFees`-style surface on Base. One deploy sets **`FACTORY_NAME`** for **every** manager in that list; rename the Clanker manager after deploy if you want receipts to say **Clanker** (see step **2b**).
+**1. Simulate (dry run)**
 
 ```shell
 cd fee-rights-exchange
 source .env
 
-export FACTORY_NAME="Bankr"
-export INITIAL_FEE_MANAGERS="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+export BANKR_FEE_MANAGERS="0xbdf938149ac6a781f94faa0ed45e6a0e984c6544"
+export CLANKER_LOCKERS="0x33e2Eda238edcF470309b8c6D228986A1204c8f9"
 
-forge script script/DeployBankrEscrowV3.s.sol \
+forge script script/DeployTokenMarketplace.s.sol \
   --rpc-url "$BASE_MAINNET_RPC_URL" \
   --private-key "$PRIVATE_KEY"
+```
 
-forge script script/DeployBankrEscrowV3.s.sol \
+**2. Broadcast + verify**
+
+```shell
+forge script script/DeployTokenMarketplace.s.sol \
   --rpc-url "$BASE_MAINNET_RPC_URL" \
   --private-key "$PRIVATE_KEY" \
   --broadcast \
@@ -229,32 +232,26 @@ forge script script/DeployBankrEscrowV3.s.sol \
   --etherscan-api-key "$ETHERSCAN_API_KEY"
 ```
 
-Replace `0xaaaa…` / `0xbbbb…` with your **real** Bankr and Clanker (or other) fee manager addresses from the same discovery path you use for `prepareDeposit` (token-fees / internal registry — never guess).
+The script prints three addresses at the end — copy them directly into your `.env`:
 
-**2b. Optional — different receipt label for Clanker’s fee manager**
-
-After deploy, escrow owner:
-
-```shell
-cast send <ESCROW_ADDRESS> "setFactoryName(address,string)" <CLANKER_FEE_MANAGER_ADDRESS> "Clanker" \
-  --rpc-url "$BASE_MAINNET_RPC_URL" --private-key "$PRIVATE_KEY"
+```
+VITE_DEFAULT_RECEIPT_COLLECTION=  <TMPR address>
+VITE_BANKR_ESCROW_ADDRESS=        <BankrEscrowV3 address>
+VITE_CLANKER_ESCROW_ADDRESS=      <ClankerEscrowV1 address>
 ```
 
 Use a [Basescan API key](https://basescan.org/apis) as `ETHERSCAN_API_KEY` (Foundry passes it to the Blockscout-compatible verifier for Base).
 
-**3. Save the printed addresses**
-
-The script logs `BankrEscrowV3 deployed:` and `BankrFeeRightsReceipt deployed:`. You need both for the frontend.
-
-**4. Rebuild the app (Vercel / CI)**
+**3. Rebuild the app (Vercel / CI)**
 
 Set or update **before** `npm run build`:
 
 | Variable | Set to |
-|----------|--------|
-| `VITE_ESCROW_ADDRESS` | New escrow address |
-| `VITE_DEFAULT_RECEIPT_COLLECTION` | **New** receipt contract (`Token Marketplace` / symbol **TMPR** on explorers — from `escrow.receipt()` on BaseScan) |
-| `VITE_RECEIPT_COLLECTION_ALIASES` | Optional comma list of **previous** receipt NFT contracts so wallets still see old listings |
+|---|---|
+| `VITE_DEFAULT_RECEIPT_COLLECTION` | TMPR receipt contract address (printed above) |
+| `VITE_BANKR_ESCROW_ADDRESS` | `BankrEscrowV3` address (printed above) |
+| `VITE_CLANKER_ESCROW_ADDRESS` | `ClankerEscrowV1` address (printed above) |
+| `VITE_RECEIPT_COLLECTION_ALIASES` | Optional: old receipt contract(s) so legacy NFTs still appear |
 
 `VITE_MARKETPLACE_ADDRESS` is unchanged unless you also redeploy `FeeRightsFixedSale`.
 

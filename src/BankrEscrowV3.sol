@@ -73,8 +73,11 @@ contract BankrEscrowV3 is Ownable, ReentrancyGuard {
     error InvalidReceiptPosition(bytes32 poolId);
     error SellerCannotCancelAfterNftTransfer(bytes32 poolId);
 
-    constructor(address initialOwner) Ownable(initialOwner) {
-        receipt = new BankrFeeRightsReceipt(address(this));
+    /// @param initialOwner  Contract owner / admin.
+    /// @param receipt_      Shared TMPR receipt collection (must have already authorized this escrow).
+    constructor(address initialOwner, BankrFeeRightsReceipt receipt_) Ownable(initialOwner) {
+        if (address(receipt_) == address(0)) revert ZeroAddress();
+        receipt = receipt_;
     }
 
     /// @notice Deterministic receipt id for a fee manager and pool.

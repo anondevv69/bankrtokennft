@@ -2,16 +2,18 @@
 pragma solidity 0.8.24;
 
 import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
 import {Strings} from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import {IERC20Metadata} from "openzeppelin-contracts/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title BankrFeeRightsReceipt
-/// @notice ERC721 receipt minted when escrow finalizes custody of transferable creator fee rights.
-///         Works with any fee-manager contract that matches `IBankrFees`. Serial # in metadata is per mint.
-/// @dev Only the escrow contract may mint or burn. `factoryName` brands the launch venue (Bankr, Clanker, …).
+/// @notice ERC721 receipt minted when an escrow finalizes custody of transferable creator fee rights.
+///         Shared across multiple escrow contracts (one per fee-manager protocol, e.g. Bankr, Clanker).
+///         Serial # in metadata is per mint. `factoryName` brands the launch venue.
+/// @dev The owner may authorize / deauthorize escrow contracts.
 ///      ERC721 collection name/symbol are marketplace-branded (not Bankr-specific).
-contract BankrFeeRightsReceipt is ERC721 {
+contract BankrFeeRightsReceipt is ERC721, Ownable {
     address private constant WETH_BASE = 0x4200000000000000000000000000000000000006;
 
     /// @notice Metadata stored per minted receipt.
@@ -24,7 +26,8 @@ contract BankrFeeRightsReceipt is ERC721 {
         string factoryName; // launch venue label — set by escrow at mint time
     }
 
-    address public immutable escrow;
+    /// @notice Escrow contracts authorized to mint / burn receipts.
+    mapping(address escrow => bool) public authorizedEscrow;
 
     /// @notice Total receipts ever minted (never decremented on burn).
     uint256 public totalMinted;
@@ -33,17 +36,26 @@ contract BankrFeeRightsReceipt is ERC721 {
     /// @notice Sequential 1-based serial number for each tokenId.
     mapping(uint256 tokenId => uint256 serial) private _serials;
 
+    event EscrowAuthorizationUpdated(address indexed escrow, bool authorized);
+
     error NotEscrow();
     error ZeroAddress();
 
     modifier onlyEscrow() {
-        if (msg.sender != escrow) revert NotEscrow();
+        if (!authorizedEscrow[msg.sender]) revert NotEscrow();
         _;
     }
 
-    constructor(address escrow_) ERC721("Token Marketplace", "TMPR") {
-        if (escrow_ == address(0)) revert ZeroAddress();
-        escrow = escrow_;
+    /// @param initialOwner Address that can authorize / deauthorize escrows.
+    constructor(address initialOwner) ERC721("Token Marketplace", "TMPR") Ownable(initialOwner) {
+        if (initialOwner == address(0)) revert ZeroAddress();
+    }
+
+    /// @notice Authorize or deauthorize an escrow contract to mint / burn receipts.
+    function setEscrowAuthorized(address escrow, bool authorized) external onlyOwner {
+        if (escrow == address(0)) revert ZeroAddress();
+        authorizedEscrow[escrow] = authorized;
+        emit EscrowAuthorizationUpdated(escrow, authorized);
     }
 
     // ── Escrow-only mutations ────────────────────────────────────────────────

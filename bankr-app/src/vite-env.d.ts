@@ -16,6 +16,12 @@ interface ImportMetaEnv {
   readonly VITE_RECEIPT_SCAN_BLOCKS?: string;
   /** Optional — `BankrEscrowV3` for in-app escrow wizard (defaults to project deploy). */
   readonly VITE_ESCROW_ADDRESS?: string;
+  /** Optional alias for Bankr escrow (same as `VITE_ESCROW_ADDRESS` if both set — prefer explicit Bankr here). */
+  readonly VITE_BANKR_ESCROW_ADDRESS?: string;
+  /** `ClankerEscrowV1` — required for listing Clanker tokens end-to-end. */
+  readonly VITE_CLANKER_ESCROW_ADDRESS?: string;
+  /** Optional — Base `LpLockerv2` used when `CLANKER_API_KEY` does not supply locker (manual pool paste path). */
+  readonly VITE_CLANKER_DEFAULT_LOCKER?: string;
 }
 
 interface ImportMeta {

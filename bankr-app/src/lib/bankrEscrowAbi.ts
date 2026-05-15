@@ -49,6 +49,13 @@ export const bankrEscrowAbi = [
   },
   {
     type: "function",
+    name: "feeManagerForPool",
+    stateMutability: "view",
+    inputs: [{ name: "poolId", type: "bytes32" }],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
     name: "tokenIdFor",
     stateMutability: "pure",
     inputs: [

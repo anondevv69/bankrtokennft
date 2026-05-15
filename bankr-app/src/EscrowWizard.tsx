@@ -8,14 +8,12 @@ import { bankrEscrowAbi } from "./lib/bankrEscrowAbi";
 import { bankrFeesMinimalAbi } from "./lib/bankrFeesMinimalAbi";
 import { inferToken0Token1, rowLaunchedToken, launchRowLabel, rowPoolIdHex } from "./lib/escrowArgs";
 
-export type EscrowWizardProps = {
-  row: Record<string, unknown>;
-  escrowAddress: Address;
-  userAddress: Address;
-  onClose: () => void;
-  /** After successful finalize — parent should rescan receipt NFTs. */
-  onDone: () => void;
-};
+import { EscrowWizardClanker } from "./EscrowWizardClanker";
+import type { EscrowWizardProps } from "./escrowWizardTypes";
+import { rowClankerListingReady } from "./lib/clankerDetail";
+import { clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
+
+export type { EscrowWizardProps } from "./escrowWizardTypes";
 
 function rowFeeManager(row: Record<string, unknown>): Address | null {
   const v = row.feeManager ?? row.fee_manager;
@@ -187,7 +185,7 @@ function EscrowStepper({ step }: { step: 1 | 2 | 3 }) {
   );
 }
 
-export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone }: EscrowWizardProps) {
+function EscrowWizardBankr({ row, escrowAddress, userAddress, onClose, onDone }: EscrowWizardProps) {
   const config = useConfig();
   const publicClient = usePublicClient();
   const chainId = useChainId();
@@ -552,4 +550,38 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
       </div>
     </div>
   );
+}
+
+export function EscrowWizard(props: EscrowWizardProps) {
+  if (rowClankerListingReady(props.row)) {
+    const ce = props.clankerEscrowAddress ?? clankerEscrowAddressFromEnv();
+    if (!ce) {
+      return (
+        <div className="settings-overlay" onClick={props.onClose}>
+          <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-sheet__head">
+              <h3>List for sale</h3>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={props.onClose}>
+                ✕
+              </button>
+            </div>
+            <p className="err">
+              Set <span className="mono">VITE_CLANKER_ESCROW_ADDRESS</span> to your deployed Clanker escrow contract and
+              redeploy the site.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <EscrowWizardClanker
+        row={props.row}
+        clankerEscrowAddress={ce}
+        userAddress={props.userAddress}
+        onClose={props.onClose}
+        onDone={props.onDone}
+      />
+    );
+  }
+  return <EscrowWizardBankr {...props} />;
 }

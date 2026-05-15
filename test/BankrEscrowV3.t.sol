@@ -25,7 +25,12 @@ contract BankrEscrowV3Test is Test {
         token0 = new MockERC20("Wrapped Ether", "WETH");
         token1 = new MockERC20("Bankr Test Token", "BNKR");
         feesManager = new MockBankrFeesManagerV2(token0, token1);
-        escrow = new BankrEscrowV3(ADMIN);
+
+        // Deploy shared receipt, then escrow, then authorize escrow on receipt.
+        BankrFeeRightsReceipt tmpr = new BankrFeeRightsReceipt(ADMIN);
+        escrow = new BankrEscrowV3(ADMIN, tmpr);
+        vm.prank(ADMIN);
+        tmpr.setEscrowAuthorized(address(escrow), true);
 
         feesManager.seedBeneficiary(POOL_ID, SELLER, FULL_SHARE);
 

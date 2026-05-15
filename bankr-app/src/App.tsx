@@ -46,6 +46,17 @@ import {
   WETH_BASE,
 } from "./lib/escrowArgs";
 import {
+  rowClankerListingReady,
+  fetchClankerTokenDetail,
+  clankerLockerFromDetail,
+  clankerPoolFromDetail,
+  clankerPairedFromDetail,
+  mergeClankerManual,
+  type ClankerManualFields,
+} from "./lib/clankerDetail";
+import { bankrEscrowAddressFromEnv, clankerEscrowAddressFromEnv } from "./lib/deployAddresses";
+import { resolveReceiptRedeemEscrow } from "./lib/receiptRedeemEscrow";
+import {
   formatListFlowError,
   isMarketplaceApproved,
   readNftOwner,
@@ -140,18 +151,8 @@ function receiptRowKey(collection: Address, tokenId: string): string {
   return `${getAddress(collection).toLowerCase()}|${tokenId}`;
 }
 
-const ESCROW_DEFAULT: Address = "0x7BD14E540Ac55E229587Bf3Cd0Fc815A7afcf461";
-
-function escrowAddressFromEnv(): Address {
-  const raw = (import.meta as ImportMeta).env.VITE_ESCROW_ADDRESS;
-  if (typeof raw === "string") {
-    const a = tryParseAddress(raw.trim());
-    if (a) return a;
-  }
-  return ESCROW_DEFAULT;
-}
-
-const ESCROW_ADDRESS: Address = escrowAddressFromEnv();
+const ESCROW_ADDRESS: Address = bankrEscrowAddressFromEnv();
+const CLANKER_ESCROW_ADDRESS: Address | null = clankerEscrowAddressFromEnv();
 
 function shortAddr(addr: string) {
   return addr.slice(0, 6) + "…" + addr.slice(-4);
@@ -1465,13 +1466,24 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     args: tokenId !== null ? [tokenId] : undefined, chainId: MVP_CHAIN_ID,
     query: { enabled: readOk },
   });
-  const { data: receiptEscrow } = useReadContract({
-    address: collection,
-    abi: bankrFeeRightsReceiptAbi,
-    functionName: "escrow",
-    chainId: MVP_CHAIN_ID,
-    query: { enabled: readOk },
-  });
+
+  const [redeemEscrowResolved, setRedeemEscrowResolved] = useState<Address>(ESCROW_ADDRESS);
+
+  useEffect(() => {
+    if (!publicClient || tokenId === null || !readOk) return;
+    let cancelled = false;
+    void resolveReceiptRedeemEscrow(publicClient, {
+      collection,
+      tokenId,
+      bankrEscrow: ESCROW_ADDRESS,
+      clankerEscrow: CLANKER_ESCROW_ADDRESS,
+    }).then((addr) => {
+      if (!cancelled) setRedeemEscrowResolved(addr);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [publicClient, collection, tokenId, readOk]);
 
   const canPull = Boolean(
     (typeof approvedSpender === "string" && isAddress(approvedSpender) &&
@@ -1495,16 +1507,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
       "List"
     );
 
-  const redeemEscrowAddr = useMemo((): Address => {
-    if (typeof receiptEscrow === "string" && isAddress(receiptEscrow, { strict: false })) {
-      try {
-        return getAddress(receiptEscrow as Address);
-      } catch {
-        /* fall through */
-      }
-    }
-    return ESCROW_ADDRESS;
-  }, [receiptEscrow]);
+  const redeemEscrowAddr = redeemEscrowResolved;
 
   const onList = async () => {
     if (!priceOk || tokenId === null || txDisabled || !publicClient || !address) return;
@@ -1690,6 +1693,11 @@ export default function App() {
   const [bankrErr, setBankrErr] = useState<string | null>(null);
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
   const [escrowWizardRow, setEscrowWizardRow] = useState<Record<string, unknown> | null>(null);
+  /** Manual Clanker metadata keyed by launched token `0x` lowercase — listing without `CLANKER_API_KEY`. */
+  const [clankerManualByToken, setClankerManualByToken] = useState<Record<string, ClankerManualFields>>({});
+  const [clankerPoolDraft, setClankerPoolDraft] = useState<Record<string, string>>({});
+  const [clankerLockerDraft, setClankerLockerDraft] = useState<Record<string, string>>({});
+  const [clankerManualErr, setClankerManualErr] = useState<Record<string, string>>({});
   const [receiptManualPool, setReceiptManualPool] = useState("");
   const [receiptManualToken, setReceiptManualToken] = useState("");
   const [receiptManualFeeManager, setReceiptManualFeeManager] = useState("");
@@ -2038,7 +2046,31 @@ export default function App() {
         /* Clanker supplement only — ignore parse failures */
       }
 
-      setBankrRows(mergeCreatorFeeRows(bankrRowsLocal, clankerRows));
+      const merged = mergeCreatorFeeRows(bankrRowsLocal, clankerRows);
+      const enriched = await Promise.all(
+        merged.map(async (row) => {
+          if (row.__launchVenue !== "Clanker") return row;
+          const ta = rowLaunchedToken(row);
+          if (!ta) return row;
+          try {
+            const detail = await fetchClankerTokenDetail(ta);
+            if (!detail) return { ...row, __clankerDetailFailed: true };
+            const locker = clankerLockerFromDetail(detail);
+            const pool = clankerPoolFromDetail(detail);
+            const paired = clankerPairedFromDetail(detail);
+            if (!pool) return { ...row, __clankerDetailFailed: true };
+            return {
+              ...row,
+              ...(locker ? { __clankerLocker: locker } : {}),
+              __clankerPool: pool,
+              ...(paired ? { __clankerPaired: paired } : {}),
+            };
+          } catch {
+            return { ...row, __clankerDetailFailed: true };
+          }
+        }),
+      );
+      setBankrRows(enriched);
     } catch (e) {
       setBankrErr(
         e instanceof Error
@@ -2058,6 +2090,36 @@ export default function App() {
   }, [loadBankrLaunches, refetchListings, qc]);
 
   const refreshBusy = bankrLoading || scanning;
+
+  const applyClankerManualForToken = useCallback((tokenKey: string) => {
+    const poolRaw = clankerPoolDraft[tokenKey]?.trim() ?? "";
+    if (!poolRaw.startsWith("0x") || !isAddress(poolRaw, { strict: false })) {
+      setClankerManualErr((prev) => ({
+        ...prev,
+        [tokenKey]: "Enter the Uniswap V3 pool contract: 0x + 40 hex characters.",
+      }));
+      return;
+    }
+    const lockerRaw = clankerLockerDraft[tokenKey]?.trim();
+    if (lockerRaw) {
+      if (!lockerRaw.startsWith("0x") || !isAddress(lockerRaw, { strict: false })) {
+        setClankerManualErr((prev) => ({ ...prev, [tokenKey]: "Invalid locker address (leave blank to use the default)." }));
+        return;
+      }
+    }
+    setClankerManualErr((prev) => {
+      const next = { ...prev };
+      delete next[tokenKey];
+      return next;
+    });
+    setClankerManualByToken((prev) => ({
+      ...prev,
+      [tokenKey]: {
+        pool: getAddress(poolRaw),
+        ...(lockerRaw && isAddress(lockerRaw, { strict: false }) ? { locker: getAddress(lockerRaw) } : {}),
+      },
+    }));
+  }, [clankerPoolDraft, clankerLockerDraft]);
 
   useEffect(() => {
     if (!address) {
@@ -2334,9 +2396,10 @@ export default function App() {
                             rel="noreferrer"
                           >
                             Clanker creator search
-                          </a>
-                          . <strong>List</strong> needs a Doppler-style bytes32 pool id (usually from Bankr-indexed rows);
-                          Clanker-only rows link to BaseScan — use <strong>advanced</strong> to paste pool id when needed.
+                          </a>{" "}
+                          (public — no key). <strong>List</strong> needs either a Bankr <strong>pool id</strong>, or for Clanker a Uniswap V3{" "}
+                          <strong>pool contract</strong> (paste under the row if you do not use authenticated token lookup). Optional{" "}
+                          <span className="mono">CLANKER_API_KEY</span> on the server fills pool and locker automatically.
                         </p>
                       </InfoTip>
                     </h2>
@@ -2350,7 +2413,8 @@ export default function App() {
                     </button>
                   </div>
                   <p className="muted one-liner">
-                    Tokens we found for your wallet (Bankr + Clanker). <strong>List</strong> when the row includes a pool id.
+                    Bankr: list when a <strong>pool id</strong> is present. Clanker: list when we have a <strong>pool contract</strong> (API auto-fill or paste below) — locker defaults via{" "}
+                    <span className="mono">VITE_CLANKER_DEFAULT_LOCKER</span>.
                   </p>
                   {idsForWatch.length > 0 && !bfrrDedupeReady && (
                     <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
@@ -2360,22 +2424,33 @@ export default function App() {
                   {bankrRowsNotYetReceived.length > 0 ? (
                     <ul className="bankr-panel__list">
                       {bankrRowsNotYetReceived.map((row, i) => {
-                        const ta = row.tokenAddress;
-                        const pid = row.poolId;
-                        const poolHex = rowPoolIdHex(row);
-                        const poolReady = Boolean(poolHex);
+                        const launched = rowLaunchedToken(row);
+                        const manualKey = launched ? launched.toLowerCase() : null;
+                        const manual =
+                          manualKey !== null ? clankerManualByToken[manualKey] : undefined;
+                        const rowEffective =
+                          manual !== undefined ? mergeClankerManual(row, manual) : row;
+                        const ta = rowEffective.tokenAddress ?? row.tokenAddress;
+                        const pid = rowEffective.poolId ?? row.poolId;
+                        const poolHex = rowPoolIdHex(rowEffective);
+                        const poolReady =
+                          Boolean(poolHex) || rowClankerListingReady(rowEffective);
                         const key =
                           typeof ta === "string" && ta.startsWith("0x")
                             ? ta.toLowerCase()
                             : typeof pid === "string"
                               ? `${pid}-${i}`
                               : `row-${i}`;
+                        const showClankerManual =
+                          row.__launchVenue === "Clanker" &&
+                          manualKey !== null &&
+                          !rowClankerListingReady(rowEffective);
                         return (
                           <li key={key}>
                             <div className="bankr-panel__row">
                               <div className="bankr-panel__col">
                                 <span className="bankr-panel__name">
-                                  {launchRowLabel(row)}
+                                  {launchRowLabel(rowEffective)}
                                   {row.__launchVenue === "Clanker" && !poolReady ? (
                                     <span className="muted" style={{ marginLeft: "0.35rem", fontSize: "0.78rem" }}>
                                       · Clanker
@@ -2387,6 +2462,15 @@ export default function App() {
                                     Pool {poolHex.slice(0, 10)}…{poolHex.slice(-8)}
                                   </div>
                                 )}
+                                {!poolHex &&
+                                  row.__launchVenue === "Clanker" &&
+                                  typeof rowEffective.__clankerPool === "string" &&
+                                  rowEffective.__clankerPool.startsWith("0x") &&
+                                  poolReady && (
+                                    <div className="bankr-panel__sub mono" title={String(rowEffective.__clankerPool)}>
+                                      Pair pool {shortAddr(String(rowEffective.__clankerPool))}
+                                    </div>
+                                  )}
                               </div>
                               <a
                                 className="bankr-panel__row-ext"
@@ -2404,13 +2488,98 @@ export default function App() {
                                 title={
                                   poolReady
                                     ? undefined
-                                    : "Pool id missing — use advanced paste or a Bankr-indexed row with pool id."
+                                    : row.__launchVenue === "Clanker"
+                                      ? "Paste the Uniswap V3 pool contract under this row (or set CLANKER_API_KEY on the server)."
+                                      : "Pool id missing — use advanced paste or a Bankr-indexed row with pool id."
                                 }
-                                onClick={() => setEscrowWizardRow(row)}
+                                onClick={() => setEscrowWizardRow(rowEffective)}
                               >
                                 List
                               </button>
                             </div>
+                            {showClankerManual && manualKey !== null ? (
+                              <div
+                                className="bankr-panel__clanker-manual"
+                                style={{
+                                  marginTop: "0.45rem",
+                                  paddingTop: "0.45rem",
+                                  borderTop: "1px solid rgba(63, 63, 70, 0.35)",
+                                }}
+                              >
+                                <p className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.4rem", lineHeight: 1.45 }}>
+                                  Paste this token’s <strong>Uniswap V3 pool</strong> on Base (not the ERC-20 address).
+                                  Locker blank → uses <span className="mono">VITE_CLANKER_DEFAULT_LOCKER</span> (v3.1{" "}
+                                  <span className="mono">LpLockerv2</span>).
+                                </p>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexWrap: "wrap",
+                                    gap: "0.4rem",
+                                    alignItems: "center",
+                                  }}
+                                >
+                                  <input
+                                    type="text"
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    placeholder="Pool contract 0x…"
+                                    className="mono"
+                                    style={{
+                                      flex: "1 1 220px",
+                                      minWidth: 0,
+                                      padding: "0.35rem 0.5rem",
+                                      borderRadius: 8,
+                                      border: "1px solid rgba(63, 63, 70, 0.55)",
+                                      background: "rgba(9, 9, 11, 0.6)",
+                                      color: "inherit",
+                                    }}
+                                    value={clankerPoolDraft[manualKey] ?? ""}
+                                    onChange={(e) =>
+                                      setClankerPoolDraft((prev) => ({
+                                        ...prev,
+                                        [manualKey]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                  <input
+                                    type="text"
+                                    autoComplete="off"
+                                    spellCheck={false}
+                                    placeholder="Locker override (optional)"
+                                    className="mono"
+                                    style={{
+                                      flex: "1 1 160px",
+                                      minWidth: 0,
+                                      padding: "0.35rem 0.5rem",
+                                      borderRadius: 8,
+                                      border: "1px solid rgba(63, 63, 70, 0.55)",
+                                      background: "rgba(9, 9, 11, 0.6)",
+                                      color: "inherit",
+                                    }}
+                                    value={clankerLockerDraft[manualKey] ?? ""}
+                                    onChange={(e) =>
+                                      setClankerLockerDraft((prev) => ({
+                                        ...prev,
+                                        [manualKey]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => applyClankerManualForToken(manualKey)}
+                                  >
+                                    Apply
+                                  </button>
+                                </div>
+                                {clankerManualErr[manualKey] ? (
+                                  <p className="err" style={{ fontSize: "0.78rem", marginTop: "0.35rem" }}>
+                                    {clankerManualErr[manualKey]}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </li>
                         );
                       })}
@@ -2681,17 +2850,12 @@ export default function App() {
                               setRedeemingForReceiptKey(rk);
                               try {
                                 if (!publicClient) return;
-                                let redeemEscrow: Address = ESCROW_ADDRESS;
-                                try {
-                                  const esc = await publicClient.readContract({
-                                    address: r.collection,
-                                    abi: bankrFeeRightsReceiptAbi,
-                                    functionName: "escrow",
-                                  }) as Address;
-                                  if (isAddress(esc, { strict: false })) redeemEscrow = getAddress(esc);
-                                } catch {
-                                  /* older receipt ABI — fall back */
-                                }
+                                const redeemEscrow = await resolveReceiptRedeemEscrow(publicClient, {
+                                  collection: r.collection,
+                                  tokenId: BigInt(r.tokenId),
+                                  bankrEscrow: ESCROW_ADDRESS,
+                                  clankerEscrow: CLANKER_ESCROW_ADDRESS,
+                                });
                                 await writeContractAsync({
                                   address: redeemEscrow,
                                   abi: escrowAbi,
@@ -2826,6 +2990,7 @@ export default function App() {
         <EscrowWizard
           row={escrowWizardRow}
           escrowAddress={ESCROW_ADDRESS}
+          clankerEscrowAddress={CLANKER_ESCROW_ADDRESS}
           userAddress={address}
           onClose={() => setEscrowWizardRow(null)}
           onDone={() => {
