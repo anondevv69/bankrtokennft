@@ -536,7 +536,6 @@ function listingMatchesSearch(li: ActiveListing, enrich: ListingSearchEnrich | n
 
 function useActiveListingsSearchEnrichment(
   listings: ActiveListing[],
-  wrongNetwork: boolean,
 ): (ListingSearchEnrich | null)[] {
   const publicClient = usePublicClient();
   const queries = useQueries({
@@ -553,7 +552,7 @@ function useActiveListingsSearchEnrichment(
           : null;
       return {
         queryKey: ["listing-search-enrich", li.listingId.toString(), li.tokenId.toString(), col ?? ""] as const,
-        enabled: Boolean(publicClient && col && !wrongNetwork),
+        enabled: Boolean(publicClient && col),
         staleTime: 20_000,
         queryFn: async (): Promise<ListingSearchEnrich> => {
           if (!publicClient || !col) {
@@ -656,20 +655,20 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
   const { data: rawUri } = useReadContract({
     address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "tokenURI",
     args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: tid !== null && !wrongNetwork },
+    query: { enabled: tid !== null },
   });
   const { data: serial } = useReadContract({
     address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "serialOf",
     args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: tid !== null && !wrongNetwork },
+    query: { enabled: tid !== null },
   });
   const { data: position } = useReadContract({
     address: collection, abi: bankrFeeRightsReceiptAbi, functionName: "positionOf",
     args: tid !== null ? [tid] : undefined, chainId: MVP_CHAIN_ID,
-    query: { enabled: tid !== null && !wrongNetwork },
+    query: { enabled: tid !== null },
   });
 
-  const meta = useResolvedTokenMetadata(rawUri, tid !== null && !wrongNetwork);
+  const meta = useResolvedTokenMetadata(rawUri, tid !== null);
   const imgSrc = meta.image ?? null;
 
   const t0addr = useMemo(() => {
@@ -696,14 +695,14 @@ function BfrrCard({ tokenId: id, collection, selected, wrongNetwork, onClick, st
     abi: erc20SymbolAbi,
     functionName: "symbol",
     chainId: MVP_CHAIN_ID,
-    query: { enabled: Boolean(t0addr) && !wrongNetwork },
+    query: { enabled: Boolean(t0addr) },
   });
   const { data: sym1 } = useReadContract({
     address: t1addr,
     abi: erc20SymbolAbi,
     functionName: "symbol",
     chainId: MVP_CHAIN_ID,
-    query: { enabled: Boolean(t1addr) && !wrongNetwork },
+    query: { enabled: Boolean(t1addr) },
   });
 
   const symbol0 = typeof sym0 === "string" && sym0.trim() ? sym0.trim() : null;
@@ -816,8 +815,8 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
     }
   }, [li.collection]);
 
-  /** Read pool + metadata from the listed NFT contract (do not require `VITE_DEFAULT_RECEIPT_COLLECTION` to match). */
-  const receiptReadsEnabled = Boolean(listCol && !wrongNetwork);
+  /** Read pool + metadata from the listed NFT on Base (`chainId`), even if the wallet is on another chain. */
+  const receiptReadsEnabled = Boolean(listCol);
 
   const { data: rawUri } = useReadContract({
     address: receiptReadsEnabled ? listCol : undefined, abi: bankrFeeRightsReceiptAbi,
@@ -854,7 +853,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
 
   const { data: bankrFeesMeta } = useQuery({
     queryKey: ["bankr-token-fees", bankrLaunched, poolIdLc],
-    enabled: Boolean(receiptReadsEnabled && bankrLaunched && !wrongNetwork),
+    enabled: Boolean(receiptReadsEnabled && bankrLaunched),
     staleTime: 120_000,
     retry: 0,
     queryFn: async () => {
@@ -1405,13 +1404,12 @@ export default function App() {
       }) as bigint;
       return fetchActiveListings(publicClient, marketplace, nextId);
     },
-    enabled: Boolean(publicClient && marketplace && !wrongNetwork),
+    enabled: Boolean(publicClient && marketplace),
     staleTime: 12_000,
   });
 
   const listingSearchEnrich = useActiveListingsSearchEnrichment(
     activeListings as ActiveListing[],
-    wrongNetwork,
   );
 
   const filteredHomeListings = useMemo(() => {
@@ -1441,7 +1439,7 @@ export default function App() {
 
   const ownershipQueries = useQueries({
     queries: (() => {
-      if (!publicClient || !collection || wrongNetwork || !address) return [];
+      if (!publicClient || !collection || !address) return [];
       const me = getAddress(address);
       return idsForWatch.map((id) => ({
         queryKey: ["bfrr-owner", collection, me, id],
