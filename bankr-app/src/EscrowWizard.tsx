@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PublicClient } from "viem";
 import { getAddress, type Address, type Hex, isHex } from "viem";
-import type { Config } from "wagmi";
 import { useChainId, useConfig, usePublicClient, useSendTransaction, useSwitchChain, useWriteContract } from "wagmi";
-import { getWalletClient } from "wagmi/actions";
 import { MVP_CHAIN, MVP_CHAIN_ID } from "./chain";
+import { ensureBaseChain } from "./ensureBase";
 import { bankrEscrowAbi } from "./lib/bankrEscrowAbi";
 import { bankrFeesMinimalAbi } from "./lib/bankrFeesMinimalAbi";
 import { inferToken0Token1, normalizePoolId, rowLaunchedToken, launchRowLabel } from "./lib/escrowArgs";
@@ -157,21 +156,12 @@ async function syncAfterTx(
   return last;
 }
 
-async function readWalletChainId(config: Config): Promise<number | undefined> {
-  try {
-    const wc = await getWalletClient(config);
-    return await wc.getChainId();
-  } catch {
-    return undefined;
-  }
-}
-
 /** Three on-chain steps — cannot be one transaction (escrow + fee manager + escrow). */
 function EscrowStepper({ step }: { step: 1 | 2 | 3 }) {
   const items: { n: 1 | 2 | 3; title: string; hint: string }[] = [
     { n: 1, title: "Prepare", hint: "Escrow contract records your pool" },
     { n: 2, title: "Transfer fees", hint: "Fee contract → beneficiary points at escrow" },
-    { n: 3, title: "Finalize", hint: "Escrow mints your receipt (BFRR)" },
+    { n: 3, title: "Finalize", hint: "Escrow mints your fee-rights NFT (BFRR)" },
   ];
   return (
     <ol className="escrow-stepper" aria-label="Three steps on Base">
@@ -327,29 +317,10 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
    * Use the wallet client's chain (what MetaMask will sign), not only wagmi's `useChainId`,
    * which can briefly disagree after connect or when the extension network differs from the app.
    */
-  const ensureBase = useCallback(async () => {
-    let walletChain = await readWalletChainId(config);
-    if (walletChain === MVP_CHAIN_ID) return;
-
-    if (!switchChainAsync) {
-      throw new Error(
-        `Your wallet is on chain ${walletChain ?? "unknown"}, not Base (${MVP_CHAIN_ID}). Open your wallet (e.g. MetaMask) and switch the network to Base, then try again.`,
-      );
-    }
-
-    await switchChainAsync({ chainId: MVP_CHAIN_ID });
-
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      walletChain = await readWalletChainId(config);
-      if (walletChain === MVP_CHAIN_ID) return;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    throw new Error(
-      `Still not on Base after switching (wallet reports chain ${walletChain ?? "unknown"}). In MetaMask use the network menu and pick Base mainnet (chain ${MVP_CHAIN_ID}), then try again.`,
-    );
-  }, [config, switchChainAsync]);
+  const ensureBase = useCallback(
+    () => ensureBaseChain(config, switchChainAsync),
+    [config, switchChainAsync],
+  );
 
   const runPrepare = async () => {
     if (!feeManager || !poolId || !token0 || !token1 || !transferPayload || !publicClient) return;
@@ -535,7 +506,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
         )}
 
         {next.kind === "already_escrowed" && (
-          <p className="muted">Already done on-chain — use your BFRR below.</p>
+          <p className="muted">Already done on-chain — use your NFT below.</p>
         )}
 
         {next.kind === "prepare" && (
@@ -563,9 +534,9 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
           <div className="escrow-wizard__step">
             <EscrowStepper step={3} />
             <p className="escrow-wizard__done">Step 2 complete.</p>
-            <p className="escrow-wizard__lead">Step <strong>3 of 3</strong> — final signature mints your receipt so you can list it here.</p>
+            <p className="escrow-wizard__lead">Step <strong>3 of 3</strong> — final signature mints your NFT so you can list it here.</p>
             <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => void runFinalize()}>
-              {pending ? "…" : "Sign step 3 — mint receipt"}
+              {pending ? "…" : "Sign step 3 — mint NFT"}
             </button>
           </div>
         )}

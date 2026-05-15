@@ -3,7 +3,16 @@ import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connect
 import { MVP_CHAIN } from "./chain";
 
 /** Prefer a dedicated RPC in production (`VITE_RPC_URL`). Public endpoint is rate-limited. */
-const rpc = import.meta.env.VITE_RPC_URL ?? "https://mainnet.base.org";
+const rpc =
+  typeof import.meta.env.VITE_RPC_URL === "string" && import.meta.env.VITE_RPC_URL.trim()
+    ? import.meta.env.VITE_RPC_URL.trim()
+    : "https://mainnet.base.org";
+
+if (typeof import.meta.env.DEV !== "undefined" && import.meta.env.DEV && rpc.includes("mainnet.base.org")) {
+  console.warn(
+    "[bankr-app] VITE_RPC_URL is unset or points at mainnet.base.org — receipt scans may hit rate limits. Use a dedicated Base RPC in bankr-app/.env.",
+  );
+}
 
 /** Reown / WalletConnect Cloud project id (free). Either env name works. */
 const wcProjectIdRaw =

@@ -9,12 +9,12 @@ import {
   useReadContract,
   useWriteContract,
   useChainId,
+  useConfig,
   useSwitchChain,
 } from "wagmi";
 import type { PublicClient } from "viem";
 import {
   isAddress,
-  parseAbiItem,
   parseEther,
   formatEther,
   getAddress,
@@ -23,16 +23,22 @@ import {
 } from "viem";
 import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
 import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
-import { MVP_CHAIN_ID } from "./chain";
+import { MVP_CHAIN, MVP_CHAIN_ID } from "./chain";
+import { ensureBaseChain, formatTxError, waitForBaseReceipt } from "./ensureBase";
+import {
+  formatReceiptScanError,
+  isPlaceholderCollectionAddress,
+  scanWalletReceiptTokenIds,
+  isPublicRpcUrl,
+  rpcUrlFromEnv,
+} from "./receiptScan";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId, rowPoolIdHex, launchRowLabel, launchedTokenFromWethPair } from "./lib/escrowArgs";
+import { normalizePoolId, rowPoolIdHex, launchRowLabel, launchedTokenFromWethPair, WETH_BASE } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const GETLOGS_MAX_BLOCK_SPAN = 10_000n;
 const MAX_LISTING_IDS_TO_SCAN = 250n;
-const DEFAULT_SCAN_BLOCKS = 80_000n;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -453,33 +459,6 @@ const erc20NameAbi = [
   { type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
 ] as const;
 
-const transferEvent = parseAbiItem(
-  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
-);
-
-// ── Log chunker ──────────────────────────────────────────────────────────────
-
-async function getTransferLogsChunked(
-  client: PublicClient,
-  { collection, recipient, fromBlock, toBlock }: {
-    collection: Address; recipient: Address; fromBlock: bigint; toBlock: bigint;
-  },
-) {
-  const out = [];
-  let start = fromBlock;
-  while (start <= toBlock) {
-    const end = start + GETLOGS_MAX_BLOCK_SPAN - 1n <= toBlock
-      ? start + GETLOGS_MAX_BLOCK_SPAN - 1n : toBlock;
-    const chunk = await client.getLogs({
-      address: collection, event: transferEvent,
-      args: { to: recipient }, fromBlock: start, toBlock: end,
-    });
-    out.push(...chunk);
-    start = end + 1n;
-  }
-  return out;
-}
-
 // ── Listing fetcher ──────────────────────────────────────────────────────────
 
 type ActiveListing = {
@@ -721,7 +700,7 @@ function BfrrPreviewModal({
         aria-labelledby="bfrr-preview-title"
       >
         <div className="settings-sheet__head">
-          <h3 id="bfrr-preview-title">Receipt preview</h3>
+          <h3 id="bfrr-preview-title">NFT preview</h3>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             ✕
           </button>
@@ -770,7 +749,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
   onClick?: () => void;
   /** When true, render a non-interactive preview (e.g. next to profile actions). */
   staticDisplay?: boolean;
-  /** Profile rows: click image / “View receipt” for full-size preview (default on when static). */
+  /** Profile rows: click image / View for full-size preview (default on when static). */
   expandable?: boolean;
 }) {
   const tid = useMemo(() => { try { return BigInt(id); } catch { return null; } }, [id]);
@@ -918,7 +897,7 @@ function BfrrCard({ tokenId: id, collection, selected, onClick, staticDisplay, e
     <>
       {canExpand ? (
         <button type="button" className="bfrr-card__preview-hit" onClick={openPreview}
-          aria-label={`View receipt for ${headline}`}>
+          aria-label={`View NFT for ${headline}`}>
           {imgBlock}
           <span className="bfrr-card__expand-hint">Tap to enlarge</span>
         </button>
@@ -1139,25 +1118,45 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
       : (bankrPairLine || meta.pairTrait?.trim() || pairLabel);
 
   const pairSymbols = symbol0 && symbol1 ? `${symbol0} / ${symbol1}` : null;
-  const headlineText =
-    pairSymbols ||
-    (receiptTitle?.trim() || null) ||
-    meta.name?.trim() ||
-    bankrFeesMeta?.symbol?.trim() ||
-    (receiptReadsEnabled ? "Fee rights receipt" : "Listing");
-  const sublineText =
-    pairSymbols && receiptTitle?.trim() && receiptTitle.trim() !== pairSymbols
-      ? receiptTitle.trim()
-      : (pairSymbols && meta.name?.trim() && meta.name.trim() !== pairSymbols ? meta.name.trim() : null);
+  const tickerDisplay =
+    pairSymbols || tickerLine || bankrPairLine || (receiptReadsEnabled ? "—" : null);
+
+  const launchedContract = useMemo((): Address | undefined => {
+    if (bankrLaunched) return bankrLaunched;
+    if (!t0addr || !t1addr) return undefined;
+    const w = WETH_BASE.toLowerCase();
+    if (t0addr.toLowerCase() === w) return t1addr;
+    if (t1addr.toLowerCase() === w) return t0addr;
+    return undefined;
+  }, [bankrLaunched, t0addr, t1addr]);
+
+  const tokenNameDisplay = useMemo(() => {
+    if (!launchedContract || !t0addr || !t1addr) {
+      return bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || meta.name?.trim() || null;
+    }
+    const launched = getAddress(launchedContract);
+    if (getAddress(t0addr) === launched) {
+      return name0?.trim() || symbol0 || bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || null;
+    }
+    if (getAddress(t1addr) === launched) {
+      return name1?.trim() || symbol1 || bankrFeesMeta?.name?.trim() || bankrFeesMeta?.symbol?.trim() || null;
+    }
+    return name0?.trim() || name1?.trim() || symbol0 || symbol1 || null;
+  }, [launchedContract, t0addr, t1addr, name0, name1, symbol0, symbol1, bankrFeesMeta, meta.name]);
+
+  const cardAlt =
+    tickerDisplay ||
+    tokenNameDisplay ||
+    receiptTitle ||
+    meta.name ||
+    bankrFeesMeta?.name ||
+    "Listing";
 
   const imSeller = address !== undefined && isAddress(li.seller) &&
     getAddress(li.seller) === getAddress(address);
 
   const sellerAddr = isAddress(li.seller) ? getAddress(li.seller) : li.seller;
   const sellerScan = isAddress(li.seller) ? `https://basescan.org/address/${getAddress(li.seller)}` : undefined;
-  const nftScan = receiptReadsEnabled && listCol
-    ? `https://basescan.org/nft/${listCol}/${li.tokenId.toString()}`
-    : undefined;
 
   const [imgBroken, setImgBroken] = useState(false);
   const [bankrImgBroken, setBankrImgBroken] = useState(false);
@@ -1176,23 +1175,11 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
   const synthDataUri = useMemo(() => {
     const hasRaster = Boolean(rasterSrc);
     if (hasRaster) return null;
-    const l1 = pairSymbols || tickerLine || headlineText;
-    const l2 =
-      t0addr && t1addr
-        ? `${shortAddr(t0addr)} / ${shortAddr(t1addr)}`
-        : receiptIdLabel;
-    if (!receiptReadsEnabled && !l1) return null;
+    const l1 = tickerDisplay || "Fee rights";
+    const l2 = launchedContract ? shortAddr(launchedContract) : receiptIdLabel;
+    if (!receiptReadsEnabled && !tickerDisplay) return null;
     return listingCardPlaceholderSvg(String(l1), String(l2));
-  }, [
-    rasterSrc,
-    pairSymbols,
-    tickerLine,
-    headlineText,
-    t0addr,
-    t1addr,
-    receiptIdLabel,
-    receiptReadsEnabled,
-  ]);
+  }, [rasterSrc, tickerDisplay, launchedContract, receiptIdLabel, receiptReadsEnabled]);
 
   return (
     <div className="listing-card">
@@ -1200,7 +1187,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         <img
           className="listing-card__img"
           src={rasterSrc}
-          alt={receiptTitle || meta.name || bankrFeesMeta?.name || "Listing"}
+          alt={cardAlt}
           loading="lazy"
           decoding="async"
           onError={() => {
@@ -1212,7 +1199,7 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         <img
           className="listing-card__img"
           src={synthDataUri}
-          alt={headlineText}
+          alt={cardAlt}
           loading="lazy"
           decoding="async"
         />
@@ -1229,21 +1216,6 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
         </div>
       )}
       <div className="listing-card__body">
-        <div className="listing-card__headline" title={[headlineText, t0addr && t1addr ? `${t0addr} · ${t1addr}` : ""].filter(Boolean).join(" · ")}>
-          {headlineText}
-        </div>
-        {sublineText && (
-          <div className="listing-card__nft-name" title={sublineText}>{sublineText}</div>
-        )}
-        {receiptReadsEnabled && tickerLine && tickerLine !== headlineText && (
-          <div
-            className={`listing-card__tickers${symbol0 && symbol1 ? "" : " mono"}`}
-            title={t0addr && t1addr ? `${t0addr} ↔ ${t1addr}` : tickerLine}
-          >
-            {tickerLine}
-          </div>
-        )}
-        <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__meta">
           <div className="listing-card__meta-row">
             <span>Seller</span>
@@ -1257,64 +1229,40 @@ function ListingCard({ li, bfrr, address, txDisabled, isConnected, wrongNetwork,
             )}
             </span>
           </div>
-          {receiptReadsEnabled && t0addr && t1addr && (
-            <div className="listing-card__meta-row listing-card__meta-row--stack">
-              <span>Pool tokens</span>
-              <div className="listing-card__pool-tokens">
-                <a
-                  className="mono listing-card__meta-link"
-                  href={`https://basescan.org/address/${t0addr}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={t0addr}
-                >
-                  {symbol0 ? `${symbol0} · ` : ""}{shortAddr(t0addr)}
-                </a>
-                <a
-                  className="mono listing-card__meta-link"
-                  href={`https://basescan.org/address/${t1addr}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={t1addr}
-                >
-                  {symbol1 ? `${symbol1} · ` : ""}{shortAddr(t1addr)}
-                </a>
-              </div>
-            </div>
-          )}
-          {receiptReadsEnabled && (name0 || name1) && (
-            <div className="listing-card__meta-row listing-card__meta-row--stack">
-              <span>Token names</span>
-              <div className="listing-card__pool-tokens">
-                <span className="listing-card__name-line" title={[name0, name1].filter(Boolean).join(" · ")}>
-                  {name0}
-                  {name0 && name1 && " · "}
-                  {name1}
-                </span>
-              </div>
-            </div>
-          )}
-          <div className="listing-card__meta-row">
-            <span>Receipt</span>
-            <span className="listing-card__meta-ellipsis">
-            {nftScan ? (
-              <a
-                className="mono listing-card__meta-link"
-                href={nftScan}
-                target="_blank"
-                rel="noreferrer"
-                title={`Token ID ${li.tokenId.toString()}${meta.name ? ` · ${meta.name}` : ""}`}
-              >
-                {receiptIdLabel}
-              </a>
-            ) : (
-              <span className="mono" title={li.tokenId.toString()}>
-                {receiptIdLabel}
+          {tickerDisplay && (
+            <div className="listing-card__meta-row">
+              <span>Ticker</span>
+              <span className="listing-card__meta-ellipsis" title={t0addr && t1addr ? `${t0addr} / ${t1addr}` : tickerDisplay}>
+                {tickerDisplay}
               </span>
-            )}
-            </span>
-          </div>
+            </div>
+          )}
+          {tokenNameDisplay && (
+            <div className="listing-card__meta-row">
+              <span>Token name</span>
+              <span className="listing-card__meta-ellipsis" title={tokenNameDisplay}>
+                {tokenNameDisplay}
+              </span>
+            </div>
+          )}
+          {launchedContract && (
+            <div className="listing-card__meta-row">
+              <span>Contract</span>
+              <span className="listing-card__meta-ellipsis">
+                <a
+                  className="mono listing-card__meta-link"
+                  href={`https://basescan.org/address/${launchedContract}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={launchedContract}
+                >
+                  {shortAddr(launchedContract)}
+                </a>
+              </span>
+            </div>
+          )}
         </div>
+        <div className="listing-card__price">{formatEther(li.priceWei)} ETH</div>
         <div className="listing-card__actions">
           {imSeller ? (
             <button type="button" className="btn btn-danger btn-sm btn-full"
@@ -1348,7 +1296,11 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 }) {
   const [price, setPrice] = useState("0.01");
   const [listStep, setListStep] = useState<null | "approve" | "list">(null);
+  const [listErr, setListErr] = useState<string | null>(null);
   const listLock = useRef(false);
+  const config = useConfig();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync, isPending } = useWriteContract();
   const publicClient = usePublicClient();
 
@@ -1389,8 +1341,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     isAddress(bfrrOwner) && getAddress(bfrrOwner as Address) === getAddress(address);
   const priceNorm = price.trim().replace(",", ".");
   const priceOk = Number.isFinite(parseFloat(priceNorm)) && parseFloat(priceNorm) > 0;
-
-  const run = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { /* surfaced by writeError */ } };
+  const wrongChain = chainId !== MVP_CHAIN_ID;
 
   const [redeemPhase, setRedeemPhase] = useState(false);
   const listBusy = listStep !== null || isPending || redeemPhase;
@@ -1414,37 +1365,60 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
     return ESCROW_ADDRESS;
   }, [receiptEscrow]);
 
-  const onList = () => run(async () => {
-    if (!priceOk || tokenId === null || txDisabled || !publicClient) return;
+  const onList = async () => {
+    if (!priceOk || tokenId === null || txDisabled || !publicClient || !address) return;
     if (listLock.current) return;
     listLock.current = true;
+    setListErr(null);
     onListFlowStart?.();
     try {
+      if (!isBfrrOwner) {
+        throw new Error("This wallet does not hold this NFT on Base. Connect the wallet that owns it.");
+      }
+      await ensureBaseChain(config, switchChainAsync);
+
       if (!canPull) {
         setListStep("approve");
         const approveHash = await writeContractAsync({
-          address: collection, abi: erc721Abi, functionName: "approve",
-          args: [marketplace, tokenId], chainId: MVP_CHAIN_ID,
+          address: collection,
+          abi: erc721Abi,
+          functionName: "approve",
+          args: [marketplace, tokenId],
+          chain: MVP_CHAIN,
         });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash, chainId: MVP_CHAIN_ID });
+        await waitForBaseReceipt(publicClient, approveHash);
         setListStep("list");
       } else {
         setListStep("list");
       }
-      const listHash = await writeContractAsync({
-        address: marketplace, abi: feeRightsFixedSaleAbi, functionName: "list",
-        args: [collection, tokenId, parseEther(priceNorm)], chainId: MVP_CHAIN_ID,
+
+      const priceWei = parseEther(priceNorm);
+      await publicClient.simulateContract({
+        address: marketplace,
+        abi: feeRightsFixedSaleAbi,
+        functionName: "list",
+        args: [collection, tokenId, priceWei],
+        account: address,
+        chain: MVP_CHAIN,
       });
-      await publicClient.waitForTransactionReceipt({ hash: listHash, chainId: MVP_CHAIN_ID });
+
+      const listHash = await writeContractAsync({
+        address: marketplace,
+        abi: feeRightsFixedSaleAbi,
+        functionName: "list",
+        args: [collection, tokenId, priceWei],
+        chain: MVP_CHAIN,
+      });
+      await waitForBaseReceipt(publicClient, listHash);
       await Promise.resolve(onDone());
-    } catch {
-      /* wallet / rpc errors */
+    } catch (e) {
+      setListErr(formatTxError(e));
     } finally {
       listLock.current = false;
       setListStep(null);
       onListFlowEnd?.();
     }
-  });
+  };
 
   return (
     <div className="sell-panel">
@@ -1464,16 +1438,36 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
       </div>
 
       <div className="sell-actions sell-actions--single">
-        <button type="button" className="btn btn-primary btn-full"
-          disabled={!writeOk || !priceOk || tokenId === null || listStep !== null || isPending}
-          onClick={onList}>
-          {listLabel}
-        </button>
-        {!canPull && !listBusy && (
+        {wrongChain && !listBusy && (
           <p className="muted sell-actions__hint">
-            First listing: your wallet may prompt twice; this button runs approve then list in order.
+            Your wallet is not on Base.{" "}
+            {switchChainAsync ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void ensureBaseChain(config, switchChainAsync).catch((e) => setListErr(formatTxError(e)))}>
+                Switch to Base
+              </button>
+            ) : (
+              "Open your wallet and select Base mainnet."
+            )}
           </p>
         )}
+        <button type="button" className="btn btn-primary btn-full"
+          disabled={!writeOk || !priceOk || tokenId === null || listStep !== null || isPending || !isBfrrOwner}
+          onClick={() => void onList()}>
+          {listLabel}
+        </button>
+        {listBusy && (
+          <p className="muted sell-actions__hint">
+            {listStep === "approve"
+              ? "Step 1 of 2: approve the marketplace in your wallet extension (e.g. Coinbase Wallet popup)."
+              : "Step 2 of 2: confirm the list transaction. If nothing appears, open your wallet extension."}
+          </p>
+        )}
+        {!canPull && !listBusy && (
+          <p className="muted sell-actions__hint">
+            First listing needs two wallet confirmations: approve, then list.
+          </p>
+        )}
+        {listErr && <p className="sell-actions__error" role="alert">{listErr}</p>}
       </div>
 
       <div className="redeem-row">
@@ -1481,7 +1475,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
           <span>Return to my wallet</span>
           <InfoTip label="What “Return to my wallet” does">
             <p>
-              Sends the receipt NFT from escrow back to your wallet. You keep the token; it is no longer held for
+              Sends the NFT from escrow back to your wallet. You keep the token; it is no longer held for
               this marketplace flow. Use this if you do not want an active listing.
             </p>
           </InfoTip>
@@ -1490,17 +1484,23 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
           <button type="button" className="btn btn-ghost btn-sm"
             disabled={!writeOk || !isBfrrOwner || tokenId === null || listBusy}
             title={!isBfrrOwner ? "Use the wallet that holds this item" : undefined}
-            onClick={() => run(async () => {
+            onClick={() => void (async () => {
+              if (tokenId === null || !publicClient) return;
               setRedeemPhase(true);
+              setListErr(null);
               try {
-                await writeContractAsync({
+                await ensureBaseChain(config, switchChainAsync);
+                const hash = await writeContractAsync({
                   address: redeemEscrowAddr, abi: escrowAbi, functionName: "redeemRights",
-                  args: [tokenId!], chainId: MVP_CHAIN_ID,
+                  args: [tokenId], chain: MVP_CHAIN,
                 });
+                await waitForBaseReceipt(publicClient, hash);
+              } catch (e) {
+                setListErr(formatTxError(e));
               } finally {
                 setRedeemPhase(false);
               }
-            })}>
+            })()}>
             {redeemPhase ? (
               <><span className="spinner" /> Returning…</>
             ) : (
@@ -1560,7 +1560,7 @@ export default function App() {
     const seen = new Set<string>();
     const out: Address[] = [];
     const push = (a: Address | undefined) => {
-      if (!a) return;
+      if (!a || isPlaceholderCollectionAddress(a)) return;
       const k = a.toLowerCase();
       if (seen.has(k)) return;
       seen.add(k);
@@ -1578,11 +1578,7 @@ export default function App() {
   const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
   const txDisabled  = !isConnected || writePending || wrongNetwork;
 
-  const scanBlockSpan = useMemo(() => {
-    const raw = (import.meta as ImportMeta).env.VITE_RECEIPT_SCAN_BLOCKS;
-    const n = typeof raw === "string" ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? BigInt(Math.min(n, 500_000)) : DEFAULT_SCAN_BLOCKS;
-  }, []);
+  const usingPublicRpc = useMemo(() => isPublicRpcUrl(rpcUrlFromEnv()), []);
 
   const allTokenIds = useMemo(() => {
     const set = new Set([...scannedIds, ...manualIds]);
@@ -1610,27 +1606,14 @@ export default function App() {
     setScanning(true);
     (async () => {
       try {
-        const latest = await publicClient.getBlockNumber();
-        const from = latest > scanBlockSpan ? latest - scanBlockSpan : 0n;
-        const recipient = getAddress(address);
-        const idSet = new Set<string>();
-        for (const col of receiptScanTargets) {
-          const logs = await getTransferLogsChunked(publicClient, {
-            collection: col,
-            recipient,
-            fromBlock: from,
-            toBlock: latest,
-          });
-          for (const l of logs) {
-            const t = l.args.tokenId;
-            if (typeof t === "bigint") idSet.add(t.toString());
-          }
-        }
-        setScannedIds([...idSet].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0)));
-      } catch (e) {
-        setScanErr(
-          e instanceof Error ? e.message : "Could not scan transfers — check RPC or try pasting your token ID below.",
+        const ids = await scanWalletReceiptTokenIds(
+          publicClient,
+          getAddress(address),
+          receiptScanTargets,
         );
+        setScannedIds(ids);
+      } catch (e) {
+        setScanErr(formatReceiptScanError(e));
       } finally { setScanning(false); }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1766,7 +1749,7 @@ export default function App() {
         label = "Could not verify (RPC error). Try Refresh or another RPC.";
       } else if (ownershipReady && q?.status === "success" && (q.data === null || q.data === undefined)) {
         label =
-          "This wallet is not ownerOf that id on your configured BFRR contracts, or the id does not exist there. Add the receipt contract to VITE_RECEIPT_COLLECTION_ALIASES if it is a legacy collection.";
+          "This wallet is not ownerOf that id on your configured BFRR contracts, or the id does not exist there. Add the NFT contract to VITE_RECEIPT_COLLECTION_ALIASES if it is a legacy collection.";
       }
       return { id, label };
     }).filter((x): x is { id: string; label: string } => x !== null);
@@ -2141,16 +2124,16 @@ export default function App() {
             <>
               {receiptScanTargets.length > 0 && marketplace && (
                 <p className="muted profile-flow-lead">
-                  <strong>1</strong> Eligible token → <strong>2</strong> receipt in your wallet → <strong>3</strong> listed here.
+                  <strong>1</strong> Eligible token → <strong>2</strong> NFT in your wallet → <strong>3</strong> listed here.
                   <InfoTip label="What each step means">
                     <p>
-                      <strong>1</strong> Pick a token row and use <strong>List</strong> to run escrow (several Base confirmations may be needed) until a receipt NFT exists.
+                      <strong>1</strong> Pick a token row and use <strong>List</strong> to run escrow (several Base confirmations may be needed) until the fee-rights NFT is minted.
                     </p>
                     <p>
-                      <strong>2</strong> Open <strong>List</strong> on a receipt to set price; your wallet may approve the marketplace, then confirm the listing.
+                      <strong>2</strong> Open <strong>List</strong> on an NFT to set price; your wallet may approve the marketplace, then confirm the listing.
                     </p>
                     <p>
-                      <strong>3</strong> Active offers appear under <strong>Your listings</strong>. <strong>Return to my wallet</strong> moves the receipt out of escrow without listing it for sale.
+                      <strong>3</strong> Active offers appear under <strong>Your listings</strong>. <strong>Return to my wallet</strong> moves the NFT out of escrow without listing it for sale.
                     </p>
                   </InfoTip>
                 </p>
@@ -2164,7 +2147,7 @@ export default function App() {
                       <InfoTip label="About this list">
                         <p>
                           Rows come from your connected wallet’s fee data. <strong>List</strong> starts the on-chain flow
-                          so a receipt can show up under “Receipt in your wallet.”
+                          so an NFT can show up under “NFTs in your wallet.”
                         </p>
                       </InfoTip>
                     </h2>
@@ -2180,7 +2163,7 @@ export default function App() {
                   <p className="muted one-liner">Tokens we found for your wallet. Use <strong>List</strong> to continue.</p>
                   {idsForWatch.length > 0 && !bfrrDedupeReady && (
                     <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
-                      Matching rows to receipts you already hold…
+                      Matching rows to NFTs you already hold…
                     </p>
                   )}
                   {bankrRowsNotYetReceived.length > 0 ? (
@@ -2239,7 +2222,7 @@ export default function App() {
                           </p>
                         ) : !bfrrDedupeReady ? null : (
                           <p className="muted one-liner">
-                            Everything here already has a matching receipt below. <strong>Refresh</strong> if that seems wrong.
+                            Everything here already has a matching NFT below. <strong>Refresh</strong> if that seems wrong.
                           </p>
                         )}
                         <details className="profile-advanced">
@@ -2257,7 +2240,7 @@ export default function App() {
                                     <strong>Fee manager (optional)</strong> — From the same decoded call: the first address argument (<span className="mono">feeManager</span>). Paste it if you already transferred fees to escrow and the flow says you are not the current beneficiary; the app can then offer finalize / mint without another lookup.
                                   </li>
                                   <li>
-                                    <strong>Launched token</strong> — The ERC-20 traders swap (the coin contract), not the receipt NFT contract and not the marketplace.
+                                    <strong>Launched token</strong> — The ERC-20 traders swap (the coin contract), not the fee-rights NFT contract and not the marketplace.
                                   </li>
                                 </ol>
                               </InfoTip>
@@ -2344,10 +2327,10 @@ export default function App() {
                 <section>
                   <div className="section-head">
                     <h2 className="section-head__title">
-                      Receipt in your wallet
-                      <InfoTip label="About receipts">
+                      NFTs in your wallet
+                      <InfoTip label="About these NFTs">
                         <p>
-                          BFRR is the fee-rights receipt NFT. This list is receipts you hold that are not listed on this
+                          Each item is a BFRR fee-rights NFT on Base. This list is NFTs you hold that are not listed on this
                           site yet. <strong>List</strong> sets price (approve + list when needed). <strong>Return to my wallet</strong> moves the token from escrow back to your wallet without a sale listing.
                         </p>
                       </InfoTip>
@@ -2356,16 +2339,23 @@ export default function App() {
                       {scanning ? <><span className="spinner" />Scanning…</> : `${unlistedBfrrReceipts.length} not listed`}
                     </span>
                   </div>
-                  <p className="muted one-liner">Receipts in your wallet that are not listed here yet.</p>
+                  <p className="muted one-liner">NFTs in your wallet that are not listed here yet.</p>
+
+                  {usingPublicRpc && !scanErr && (
+                    <p className="muted one-liner" style={{ marginBottom: "0.5rem" }}>
+                      Using the public Base RPC — NFT scan is limited. For reliable discovery, set{" "}
+                      <span className="mono">VITE_RPC_URL</span> to Alchemy/Infura and redeploy.
+                    </p>
+                  )}
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
                   {!scanning && unlistedBfrrReceipts.length === 0 && ownershipReady && walletOwnedReceipts.length === 0 && idsForWatch.length === 0 && (
-                    <p className="empty">No receipt found in our scan.</p>
+                    <p className="empty">No NFTs found in our scan.</p>
                   )}
 
                   <details className="profile-advanced profile-advanced--receipt">
-                    <summary>Receipt not showing? Paste token ID (advanced)</summary>
+                    <summary>NFT not showing? Paste token ID (advanced)</summary>
                     <div className="profile-advanced__body">
                       <p className="muted one-liner" style={{ marginBottom: "0.5rem" }}>
                         If our scan missed an NFT you already minted, add its numeric ID from{" "}
@@ -2383,7 +2373,7 @@ export default function App() {
                         .
                         <InfoTip label="Finding the token ID on BaseScan">
                           <p>
-                            Open the receipt contract on BaseScan, use the <strong>ERC-721</strong> tab or your wallet’s
+                            Open the NFT contract on BaseScan, use the <strong>ERC-721</strong> tab or your wallet’s
                             token view, and copy the <strong>Token ID</strong> (digits only).
                           </p>
                         </InfoTip>
@@ -2559,7 +2549,7 @@ export default function App() {
 
               {(!marketplace || receiptScanTargets.length === 0) && (
                 <p className="muted one-liner" style={{ marginTop: "1rem" }}>
-                  Wallet and receipt features need a configured deployment (marketplace and BFRR addresses). If you expected this to work, contact the site operator.
+                  Wallet and NFT features need a configured deployment (marketplace and BFRR addresses). If you expected this to work, contact the site operator.
                 </p>
               )}
 
@@ -2569,7 +2559,7 @@ export default function App() {
                   <h2 className="section-head__title">
                     Your listings
                     <InfoTip label="About listings">
-                      <p>Items you have listed for sale on this marketplace. Cancel sale returns the receipt to your wallet.</p>
+                      <p>Items you have listed for sale on this marketplace. Cancel sale returns the NFT to your wallet.</p>
                     </InfoTip>
                   </h2>
                   <span className="scan-status">{myListings.length} active</span>
@@ -2616,10 +2606,10 @@ export default function App() {
               )}
 
               <details className="bfrr-primer bfrr-primer--profile">
-                <summary>What is a receipt?</summary>
+                <summary>What is this NFT?</summary>
                 <div className="bfrr-primer__body">
                   <p>
-                    A receipt is the BFRR fee-rights NFT on Base. Use <strong>List</strong> on a token row to complete escrow and mint one, or <strong>List</strong> on a receipt you already hold to set a price.
+                    It is a BFRR fee-rights NFT on Base — proof you escrowed creator fees for a token pair. Use <strong>List</strong> on a token row to complete escrow and mint one, or <strong>List</strong> on an NFT you already hold to set a price.
                   </p>
                 </div>
               </details>

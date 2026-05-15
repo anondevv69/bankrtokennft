@@ -950,6 +950,14 @@ input::placeholder { color: var(--muted); }
   max-width: 28rem;
 }
 
+.sell-actions__error {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--red, #f87171);
+  max-width: 28rem;
+}
+
 .approved-tag {
   display: inline-flex;
   align-items: center;
