@@ -130,6 +130,31 @@ function deriveNext(
   return { kind: "prepare" };
 }
 
+/** Wait for inclusion, then poll chain reads — RPC often lags right after `writeContract` resolves. */
+async function syncAfterTx(
+  publicClient: PublicClient,
+  escrow: Address,
+  feeManager: Address,
+  poolId: Hex,
+  user: Address,
+  transfer: { to: Address; data: Hex; chainId: number },
+  hash: Hex,
+  stuckOn: "prepare" | "transfer",
+): Promise<NextAction> {
+  await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
+
+  const deadline = Date.now() + 14_000;
+  let last: NextAction = { kind: "loading" };
+  while (Date.now() < deadline) {
+    const s = await readEscrowState(publicClient, escrow, feeManager, poolId, user);
+    last = deriveNext(s, user, transfer);
+    if (stuckOn === "prepare" && last.kind !== "prepare") return last;
+    if (stuckOn === "transfer" && last.kind !== "transfer") return last;
+    await new Promise((r) => setTimeout(r, 450));
+  }
+  return last;
+}
+
 async function readWalletChainId(config: Config): Promise<number | undefined> {
   try {
     const wc = await getWalletClient(config);
@@ -137,6 +162,37 @@ async function readWalletChainId(config: Config): Promise<number | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** Three on-chain steps — cannot be one transaction (escrow + fee manager + escrow). */
+function EscrowStepper({ step }: { step: 1 | 2 | 3 }) {
+  const items: { n: 1 | 2 | 3; title: string; hint: string }[] = [
+    { n: 1, title: "Prepare", hint: "Escrow contract records your pool" },
+    { n: 2, title: "Transfer fees", hint: "Bankr fee contract → beneficiary points at escrow" },
+    { n: 3, title: "Finalize", hint: "Escrow mints your receipt (BFRR)" },
+  ];
+  return (
+    <ol className="escrow-stepper" aria-label="Three steps on Base">
+      {items.map((it) => {
+        const done = step > it.n;
+        const current = step === it.n;
+        return (
+          <li
+            key={it.n}
+            className={`escrow-stepper__item${done ? " escrow-stepper__item--done" : ""}${current ? " escrow-stepper__item--current" : ""}`}
+          >
+            <span className="escrow-stepper__dot" aria-hidden>
+              {done ? "✓" : it.n}
+            </span>
+            <div className="escrow-stepper__text">
+              <span className="escrow-stepper__title">{it.title}</span>
+              <span className="escrow-stepper__hint">{it.hint}</span>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone }: EscrowWizardProps) {
@@ -266,12 +322,13 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
   }, [config, switchChainAsync]);
 
   const runPrepare = async () => {
-    if (!feeManager || !poolId || !token0 || !token1) return;
+    if (!feeManager || !poolId || !token0 || !token1 || !transferPayload || !publicClient) return;
     setBusy(true);
     setErr(null);
+    const tp = transferPayload;
     try {
       await ensureBase();
-      await writeContractAsync({
+      const hash = await writeContractAsync({
         address: escrowAddress,
         abi: bankrEscrowAbi,
         functionName: "prepareDeposit",
@@ -279,7 +336,17 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
         chain: MVP_CHAIN,
         chainId: MVP_CHAIN_ID,
       });
-      await refresh();
+      const nextState = await syncAfterTx(
+        publicClient,
+        escrowAddress,
+        feeManager,
+        poolId,
+        userAddress,
+        tp,
+        hash,
+        "prepare",
+      );
+      setNext(nextState);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "prepareDeposit failed");
     } finally {
@@ -288,19 +355,29 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
   };
 
   const runTransfer = async () => {
-    if (!transferPayload) return;
+    if (!transferPayload || !publicClient) return;
     setBusy(true);
     setErr(null);
+    const tp = transferPayload;
     try {
       await ensureBase();
-      await sendTransactionAsync({
-        to: transferPayload.to,
-        data: transferPayload.data,
+      const hash = await sendTransactionAsync({
+        to: tp.to,
+        data: tp.data,
         chain: MVP_CHAIN,
         chainId: MVP_CHAIN_ID,
       });
-      await new Promise((r) => setTimeout(r, 2500));
-      await refresh();
+      const nextState = await syncAfterTx(
+        publicClient,
+        escrowAddress,
+        feeManager!,
+        poolId!,
+        userAddress,
+        tp,
+        hash,
+        "transfer",
+      );
+      setNext(nextState);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Transfer tx failed");
     } finally {
@@ -309,12 +386,12 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
   };
 
   const runFinalize = async () => {
-    if (!poolId) return;
+    if (!poolId || !publicClient) return;
     setBusy(true);
     setErr(null);
     try {
       await ensureBase();
-      await writeContractAsync({
+      const hash = await writeContractAsync({
         address: escrowAddress,
         abi: bankrEscrowAbi,
         functionName: "finalizeDeposit",
@@ -322,6 +399,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
         chain: MVP_CHAIN,
         chainId: MVP_CHAIN_ID,
       });
+      await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
       await refresh();
       onDone();
       onClose();
@@ -333,12 +411,12 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
   };
 
   const runCancelPrepare = async () => {
-    if (!poolId) return;
+    if (!poolId || !publicClient) return;
     setBusy(true);
     setErr(null);
     try {
       await ensureBase();
-      await writeContractAsync({
+      const hash = await writeContractAsync({
         address: escrowAddress,
         abi: bankrEscrowAbi,
         functionName: "cancelPendingDeposit",
@@ -346,6 +424,7 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
         chain: MVP_CHAIN,
         chainId: MVP_CHAIN_ID,
       });
+      await publicClient.waitForTransactionReceipt({ hash, chainId: MVP_CHAIN_ID });
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "cancelPendingDeposit failed");
@@ -363,14 +442,14 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-sheet escrow-wizard" onClick={(e) => e.stopPropagation()}>
         <div className="settings-sheet__head">
-          <h3>Sell</h3>
+          <h3>Get receipt</h3>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
             ✕
           </button>
         </div>
 
-        <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.5rem" }}>
-          <strong>{label}</strong> — three <strong>Sell</strong> confirmations in your wallet (then you can list).
+        <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.65rem" }}>
+          <strong>{label}</strong> — <strong>three separate transactions on Base</strong> (escrow and Bankr cannot combine them into one). Finish each step and wait for confirming on Base before the next button appears.
         </p>
 
         {wrongChain && (
@@ -393,6 +472,18 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
           </p>
         )}
 
+        {(writePending || sendPending) && (
+          <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.5rem" }}>
+            <span className="spinner" /> Approve in your wallet…
+          </p>
+        )}
+
+        {busy && !writePending && !sendPending && !switchPending && next.kind !== "loading" && (
+          <p className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.5rem" }}>
+            <span className="spinner" /> Confirming on Base…
+          </p>
+        )}
+
         {next.kind === "loading" && (
           <p className="muted">
             <span className="spinner" /> Checking…
@@ -409,24 +500,32 @@ export function EscrowWizard({ row, escrowAddress, userAddress, onClose, onDone 
 
         {next.kind === "prepare" && (
           <div className="escrow-wizard__step">
-            <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => void runPrepare()}>
-              {pending ? "…" : "Sell"}
+            <EscrowStepper step={1} />
+            <p className="escrow-wizard__lead">Step <strong>1 of 3</strong> — sign in your wallet. When Base confirms, step 2 unlocks.</p>
+            <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => void runPrepare()}>
+              {pending ? "…" : "Sign step 1 — prepare"}
             </button>
           </div>
         )}
 
         {next.kind === "transfer" && (
           <div className="escrow-wizard__step">
-            <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => void runTransfer()}>
-              {pending ? "…" : "Sell"}
+            <EscrowStepper step={2} />
+            <p className="escrow-wizard__done">Step 1 complete.</p>
+            <p className="escrow-wizard__lead">Step <strong>2 of 3</strong> — another wallet signature on the fee contract. After Base confirms, step 3 is the last one.</p>
+            <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => void runTransfer()}>
+              {pending ? "…" : "Sign step 2 — transfer fee rights"}
             </button>
           </div>
         )}
 
         {next.kind === "finalize" && (
           <div className="escrow-wizard__step">
-            <button type="button" className="btn btn-ghost btn-sm" disabled={pending} onClick={() => void runFinalize()}>
-              {pending ? "…" : "Sell"}
+            <EscrowStepper step={3} />
+            <p className="escrow-wizard__done">Step 2 complete.</p>
+            <p className="escrow-wizard__lead">Step <strong>3 of 3</strong> — final signature mints your receipt so you can list it here.</p>
+            <button type="button" className="btn btn-primary btn-sm" disabled={pending} onClick={() => void runFinalize()}>
+              {pending ? "…" : "Sign step 3 — mint receipt"}
             </button>
           </div>
         )}

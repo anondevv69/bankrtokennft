@@ -759,6 +759,108 @@ input::placeholder { color: var(--muted); }
 
 .settings-sheet__head h3 { font-size: 1rem; font-weight: 700; }
 
+/* ── Escrow wizard (3-step receipt flow) ── */
+.escrow-wizard__step {
+  margin-top: 0.25rem;
+}
+
+.escrow-wizard__lead {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--muted-2);
+  margin: 0 0 0.75rem;
+}
+
+.escrow-wizard__done {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--green);
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--green-lo);
+  border-radius: var(--r-xs);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.escrow-stepper {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.escrow-stepper__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  opacity: 0.55;
+}
+
+.escrow-stepper__item--current {
+  border-color: var(--accent-md);
+  background: var(--accent-lo);
+  opacity: 1;
+}
+
+.escrow-stepper__item--done {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: var(--green-lo);
+  opacity: 1;
+}
+
+.escrow-stepper__dot {
+  flex-shrink: 0;
+  width: 1.45rem;
+  height: 1.45rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 800;
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  color: var(--muted-2);
+}
+
+.escrow-stepper__item--current .escrow-stepper__dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.escrow-stepper__item--done .escrow-stepper__dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  font-size: 0.65rem;
+}
+
+.escrow-stepper__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.escrow-stepper__title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.escrow-stepper__hint {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .settings-field { margin-bottom: 0.85rem; }
 .settings-field label {
   display: block;

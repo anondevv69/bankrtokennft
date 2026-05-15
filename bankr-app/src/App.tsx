@@ -425,36 +425,6 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
   );
 }
 
-function SettingsSheet({ mpInput, setMpInput, colInput, setColInput, onClose }: {
-  mpInput: string; setMpInput: (v: string) => void;
-  colInput: string; setColInput: (v: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-sheet" onClick={e => e.stopPropagation()}>
-        <div className="settings-sheet__head">
-          <h3>Contract addresses</h3>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
-        </div>
-        <div className="settings-field">
-          <label>Marketplace (FeeRightsFixedSale)</label>
-          <input value={mpInput} onChange={e => setMpInput(e.target.value)}
-            placeholder="0xeb8aC71B…" />
-        </div>
-        <div className="settings-field">
-          <label>BFRR receipt NFT</label>
-          <input value={colInput} onChange={e => setColInput(e.target.value)}
-            placeholder="0x4eC1a255…" />
-        </div>
-        <p className="muted" style={{ marginTop: "0.5rem" }}>
-          Pre-filled from build config. Only change if using a different deployment.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -467,10 +437,7 @@ export default function App() {
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
   const publicClient = usePublicClient();
 
-  const [mpInput, setMpInput]   = useState(envAddr("VITE_MARKETPLACE_ADDRESS"));
-  const [colInput, setColInput] = useState(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [scannedIds, setScannedIds] = useState<string[]>([]);
   const [manualIds, setManualIds] = useState<string[]>([]);
   const [pasteId, setPasteId] = useState("");
@@ -483,8 +450,8 @@ export default function App() {
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
 
-  const marketplace = tryParseAddress(mpInput);
-  const collection  = tryParseAddress(colInput);
+  const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
+  const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
   const wrongNetwork = isConnected && chainId !== MVP_CHAIN_ID;
   const txDisabled  = !isConnected || writePending || wrongNetwork;
 
@@ -669,7 +636,6 @@ export default function App() {
               })}
             </div>
           )}
-          <button className="gear-btn" title="Settings" onClick={() => setShowSettings((v) => !v)}>⚙</button>
         </div>
       </nav>
 
@@ -703,7 +669,7 @@ export default function App() {
             {listingsLoading && <p className="empty"><span className="spinner" />Loading…</p>}
 
             {!listingsLoading && (activeListings as ActiveListing[]).length === 0 && (
-              <p className="empty">{marketplace ? "Nothing for sale right now." : "Set the marketplace address in settings (⚙)."}</p>
+              <p className="empty">{marketplace ? "Nothing for sale right now." : "Listings are unavailable — this deployment has no marketplace configured."}</p>
             )}
 
             <div className="listings-grid">
@@ -855,7 +821,24 @@ export default function App() {
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
 
                   {!scanning && unlistedBfrrIds.length === 0 && allTokenIds.length === 0 && (
-                    <p className="empty">No receipts found in recent transfers. Paste your token ID if you already have one.</p>
+                    <>
+                      <p className="empty">No receipts detected from our recent scan.</p>
+                      <p className="muted one-liner" style={{ marginTop: "0.4rem" }}>
+                        Nothing here does not mean your token “disappeared.” If escrow finished, you should have a BFRR (receipt NFT) on Base — open{" "}
+                        <a
+                          href={
+                            collection
+                              ? `https://basescan.org/token/${collection}?a=${address ?? ""}`
+                              : `https://basescan.org/address/${address ?? ""}`
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          BaseScan
+                        </a>
+                        {" "}for this wallet, copy the token ID, and paste it above. Use the same wallet and network (Base) you used for escrow.
+                      </p>
+                    </>
                   )}
 
                   <div className="profile-paste-row">
@@ -951,9 +934,7 @@ export default function App() {
 
               {(!collection || !marketplace) && (
                 <p className="muted one-liner" style={{ marginTop: "1rem" }}>
-                  Open{" "}
-                  <button type="button" className="link-btn" onClick={() => setShowSettings(true)}>settings</button>
-                  {" "}to add the marketplace and receipt addresses.
+                  Wallet and receipt features need a configured deployment (marketplace and BFRR addresses). If you expected this to work, contact the site operator.
                 </p>
               )}
 
@@ -1006,7 +987,12 @@ export default function App() {
                     })}
                   </ul>
                 ) : (
-                  !bankrLoading && !bankrErr && <p className="muted one-liner">No Bankr fee tokens for this wallet.</p>
+                  !bankrLoading && !bankrErr && (
+                    <p className="muted one-liner">
+                      No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
+                      <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> with the same wallet.
+                    </p>
+                  )
                 )}
               </section>
 
@@ -1037,12 +1023,6 @@ export default function App() {
             void loadBankrLaunches();
           }}
         />
-      )}
-
-      {showSettings && (
-        <SettingsSheet mpInput={mpInput} setMpInput={setMpInput}
-          colInput={colInput} setColInput={setColInput}
-          onClose={() => setShowSettings(false)} />
       )}
 
       {writeError && (
