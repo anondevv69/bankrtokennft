@@ -24,6 +24,7 @@ import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
+import { normalizePoolId } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -447,6 +448,9 @@ export default function App() {
   const [bankrErr, setBankrErr] = useState<string | null>(null);
   const [bankrRows, setBankrRows] = useState<Record<string, unknown>[]>([]);
   const [escrowWizardRow, setEscrowWizardRow] = useState<Record<string, unknown> | null>(null);
+  const [receiptManualPool, setReceiptManualPool] = useState("");
+  const [receiptManualToken, setReceiptManualToken] = useState("");
+  const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
 
@@ -948,7 +952,6 @@ export default function App() {
                 <p className="muted one-liner">
                   Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
                 </p>
-                {bankrErr && <p className="err">{bankrErr}</p>}
                 {bankrRows.length > 0 ? (
                   <ul className="bankr-panel__list">
                     {bankrRows.map((row, i) => {
@@ -987,11 +990,72 @@ export default function App() {
                     })}
                   </ul>
                 ) : (
-                  !bankrLoading && !bankrErr && (
-                    <p className="muted one-liner">
-                      No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
-                      <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> with the same wallet.
-                    </p>
+                  !bankrLoading && (
+                    <>
+                      {bankrErr ? (
+                        <p className="err one-liner">{bankrErr}</p>
+                      ) : (
+                        <p className="muted one-liner">
+                          No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
+                          <a href="https://bankr.bot" target="_blank" rel="noreferrer">bankr.bot</a> with the same wallet.
+                        </p>
+                      )}
+                      <div className="bankr-panel__manual">
+                        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.45rem" }}>
+                          <strong>API list empty?</strong> You can still open <strong>Get receipt</strong> if you have your <span className="mono">poolId</span> (32-byte hex) and the launch <span className="mono">tokenAddress</span> — e.g. from your <strong>Prepare deposit</strong> tx on BaseScan (input data) or from Bankr.
+                        </p>
+                        {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem" }}>{receiptManualErr}</p>}
+                        <div className="profile-paste-row" style={{ marginTop: "0.5rem" }}>
+                          <input
+                            className="mono"
+                            placeholder="Pool ID (0x + 64 hex)"
+                            value={receiptManualPool}
+                            onChange={(e) => {
+                              setReceiptManualPool(e.target.value);
+                              setReceiptManualErr(null);
+                            }}
+                            spellCheck={false}
+                          />
+                        </div>
+                        <div className="profile-paste-row" style={{ marginTop: "0.35rem" }}>
+                          <input
+                            className="mono"
+                            placeholder="Launched token address (0x…)"
+                            value={receiptManualToken}
+                            onChange={(e) => {
+                              setReceiptManualToken(e.target.value);
+                              setReceiptManualErr(null);
+                            }}
+                            spellCheck={false}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={wrongNetwork}
+                            onClick={() => {
+                              const pid = normalizePoolId(receiptManualPool.trim());
+                              const tok = tryParseAddress(receiptManualToken.trim());
+                              if (!pid) {
+                                setReceiptManualErr("Pool ID must look like 0x followed by exactly 64 hexadecimal characters.");
+                                return;
+                              }
+                              if (!tok) {
+                                setReceiptManualErr("Enter a valid launched token contract address (0x…).");
+                                return;
+                              }
+                              setReceiptManualErr(null);
+                              setEscrowWizardRow({
+                                poolId: pid,
+                                tokenAddress: tok,
+                                tokenSymbol: "Token",
+                              });
+                            }}
+                          >
+                            Open Get receipt
+                          </button>
+                        </div>
+                      </div>
+                    </>
                   )
                 )}
               </section>
