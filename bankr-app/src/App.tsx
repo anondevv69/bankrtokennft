@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useAccount,
   useConnect,
@@ -18,13 +18,14 @@ import {
   formatEther,
   getAddress,
   type Address,
+  type Hex,
 } from "viem";
 import { feeRightsFixedSaleAbi } from "./lib/feeRightsFixedSaleAbi";
 import { bankrFeeRightsReceiptAbi } from "./lib/bankrFeeRightsReceiptAbi";
 import { MVP_CHAIN_ID } from "./chain";
 import { walletConnectConfigured } from "./wagmi";
 import { EscrowWizard } from "./EscrowWizard";
-import { normalizePoolId } from "./lib/escrowArgs";
+import { normalizePoolId, rowLaunchedToken } from "./lib/escrowArgs";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,11 @@ function launchRowLabel(row: Record<string, unknown>): string {
   const ta = row.tokenAddress;
   if (typeof ta === "string" && ta.length > 10) return `${ta.slice(0, 6)}…${ta.slice(-4)}`;
   return "Token";
+}
+
+/** Pool id from a Bankr API row, normalized for comparison with `positionOf.poolId`. */
+function launchRowPoolIdHex(row: Record<string, unknown>): Hex | null {
+  return normalizePoolId(row.poolId);
 }
 
 function launchRowHref(row: Record<string, unknown>, wallet: string): string {
@@ -521,7 +527,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
 
       <div className="redeem-row">
         <div className="redeem-label">
-          <span>Return to wallet</span>
+          <span>Return to my wallet</span>
           <strong className="muted" style={{ fontWeight: 500, fontSize: "0.78rem" }}>
             Pull this receipt out of Bankr escrow so it stays in your wallet (no active marketplace listing).
           </strong>
@@ -538,7 +544,7 @@ function SellPanel({ tokenIdStr, collection, marketplace, address, txDisabled,
           {isPending && listStep === null ? (
             <><span className="spinner" /> Wallet…</>
           ) : (
-            "Return to wallet"
+            "Return to my wallet"
           )}
         </button>
       </div>
@@ -658,6 +664,64 @@ export default function App() {
     () => allTokenIds.filter((id) => !myListedTokenIds.has(id)),
     [allTokenIds, myListedTokenIds],
   );
+
+  const positionQueries = useQueries({
+    queries: allTokenIds.map((id) => ({
+      queryKey: ["bfrr-position-bankr-dedupe", collection, id],
+      queryFn: async () => {
+        if (!publicClient || !collection) return null;
+        try {
+          return await publicClient.readContract({
+            address: collection,
+            abi: bankrFeeRightsReceiptAbi,
+            functionName: "positionOf",
+            args: [BigInt(id)],
+          }) as {
+            feeManager: Address;
+            poolId: Hex;
+            token0: Address;
+            token1: Address;
+            seller: Address;
+            factoryName: string;
+          };
+        } catch {
+          return null;
+        }
+      },
+      enabled: Boolean(
+        publicClient && collection && !wrongNetwork && id.length > 0 && /^\d+$/.test(id),
+      ),
+      staleTime: 15_000,
+    })),
+  });
+
+  const { heldPoolIds, heldPairTokens } = useMemo(() => {
+    const pools = new Set<string>();
+    const tokens = new Set<string>();
+    for (const q of positionQueries) {
+      const pos = q.data;
+      if (!pos) continue;
+      if (pos.poolId) pools.add(String(pos.poolId).toLowerCase());
+      try {
+        tokens.add(getAddress(pos.token0).toLowerCase());
+        tokens.add(getAddress(pos.token1).toLowerCase());
+      } catch {
+        /* ignore malformed */
+      }
+    }
+    return { heldPoolIds: pools, heldPairTokens: tokens };
+  }, [positionQueries]);
+
+  const bankrRowsNotYetReceived = useMemo(() => {
+    if (heldPoolIds.size === 0 && heldPairTokens.size === 0) return bankrRows;
+    return bankrRows.filter((row) => {
+      const pid = launchRowPoolIdHex(row);
+      if (pid && heldPoolIds.has(pid.toLowerCase())) return false;
+      const tok = rowLaunchedToken(row);
+      if (tok && heldPairTokens.has(tok.toLowerCase())) return false;
+      return true;
+    });
+  }, [bankrRows, heldPoolIds, heldPairTokens]);
 
   const invalidate = () => void qc.invalidateQueries();
   const run = async (fn: () => Promise<unknown>) => {
@@ -940,7 +1004,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="muted one-liner">
-                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Return to wallet</strong> to pull the receipt out of Bankr escrow.
+                    Receipts in your wallet that are not currently listed. Use <strong>Sell</strong> to set a price, or <strong>Return to my wallet</strong> to pull the receipt out of Bankr escrow.
                   </p>
 
                   {scanErr && <p className="err" style={{ marginBottom: "0.75rem" }}>{scanErr}</p>}
@@ -1030,7 +1094,7 @@ export default function App() {
                               void refetchListings();
                             })}
                           >
-                            Return to wallet
+                            Return to my wallet
                           </button>
                         </div>
                         {selectedId === id && (
@@ -1073,9 +1137,9 @@ export default function App() {
                 <p className="muted one-liner">
                   Tokens where you earn fees on Bankr but the on-chain receipt is not in your wallet yet. <strong>Get receipt</strong> runs a short setup so you can list here.
                 </p>
-                {bankrRows.length > 0 ? (
+                {bankrRowsNotYetReceived.length > 0 ? (
                   <ul className="bankr-panel__list">
-                    {bankrRows.map((row, i) => {
+                    {bankrRowsNotYetReceived.map((row, i) => {
                       const ta = row.tokenAddress;
                       const pid = row.poolId;
                       const key =
@@ -1115,6 +1179,10 @@ export default function App() {
                     <>
                       {bankrErr ? (
                         <p className="err one-liner">{bankrErr}</p>
+                      ) : bankrRows.length > 0 ? (
+                        <p className="muted one-liner">
+                          Bankr still lists fee launches below, but each one already lines up with a receipt in your wallet (see <strong>Ready to list</strong> above). <strong>Refresh</strong> if you just minted, sold, or redeemed.
+                        </p>
                       ) : (
                         <p className="muted one-liner">
                           No Bankr fee rows from our API right now — that is separate from your on-chain balance. Try <strong>Refresh</strong> or check{" "}
