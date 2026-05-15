@@ -40,6 +40,22 @@ function tryParseAddress(raw: string): Address | undefined {
   try { return getAddress(t); } catch { return undefined; }
 }
 
+/** Plain hint when pasted `poolId` is not exactly 32 bytes hex. */
+function explainPoolIdPasteError(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "Paste the pool id from your Prepare deposit transaction (see “Where do I find this?”).";
+  if (!t.startsWith("0x")) return "Pool id must start with 0x.";
+  const body = t.slice(2);
+  const hexOnly = body.replace(/[^0-9a-fA-F]/g, "");
+  if (hexOnly.length !== body.length) {
+    return "Remove spaces, line breaks, or quotes — use only 0x and hex characters.";
+  }
+  if (hexOnly.length !== 64) {
+    return `You have ${hexOnly.length} hex digits after 0x; the pool id must be exactly 64 (66 characters including 0x). On BaseScan decode your Prepare deposit input and copy only the poolId value.`;
+  }
+  return "That pool id could not be read — try copying it again from BaseScan.";
+}
+
 function envAddr(name: string): string {
   const raw = (import.meta as ImportMeta).env[name];
   return typeof raw === "string" ? (tryParseAddress(raw) ?? "") : "";
@@ -1001,14 +1017,29 @@ export default function App() {
                         </p>
                       )}
                       <div className="bankr-panel__manual">
-                        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.45rem" }}>
-                          <strong>API list empty?</strong> You can still open <strong>Get receipt</strong> if you have your <span className="mono">poolId</span> (32-byte hex) and the launch <span className="mono">tokenAddress</span> — e.g. from your <strong>Prepare deposit</strong> tx on BaseScan (input data) or from Bankr.
+                        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.85rem", marginBottom: "0.35rem" }}>
+                          Bankr did not return your launch in the list above, so this is a <strong>backup path</strong> — normally you would not need it. Two clipboard pastes, then you are back in the same <strong>Get receipt</strong> popup as before.
                         </p>
-                        {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem" }}>{receiptManualErr}</p>}
-                        <div className="profile-paste-row" style={{ marginTop: "0.5rem" }}>
+                        {receiptManualErr && <p className="err" style={{ fontSize: "0.82rem", marginBottom: "0.35rem" }}>{receiptManualErr}</p>}
+                        <details className="bfrr-primer" style={{ marginBottom: "0.65rem" }}>
+                          <summary>Where do I find this? (2 minutes)</summary>
+                          <div className="bfrr-primer__body" style={{ fontSize: "0.82rem" }}>
+                            <ol style={{ margin: "0.35rem 0 0 1.1rem", padding: 0 }}>
+                              <li style={{ marginBottom: "0.35rem" }}>
+                                <strong>Pool ID</strong> — On{" "}
+                                <a href={`https://basescan.org/address/${ESCROW_ADDRESS}`} target="_blank" rel="noreferrer">BaseScan</a>, open your wallet’s transaction <strong>Prepare deposit</strong> (method to escrow <span className="mono">{shortAddr(ESCROW_ADDRESS)}</span>). Use <strong>Input data</strong> → <strong>Decode input data</strong>. Copy the argument named like <span className="mono">poolId</span> — it must be <strong>0x</strong> plus <strong>64</strong> hex characters (66 characters total). If you copy the whole input string or a shorter hex, this box will error until it is exactly that length.
+                              </li>
+                              <li>
+                                <strong>Launched token address</strong> — The ERC-20 you launched (the coin contract traders swap), <strong>not</strong> the BFRR receipt contract and <strong>not</strong> the marketplace. Same launch page on Bankr often shows “contract” or “token address”.
+                              </li>
+                            </ol>
+                          </div>
+                        </details>
+                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginBottom: "0.2rem" }}>1. Pool id (bytes32)</label>
+                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
                           <input
                             className="mono"
-                            placeholder="Pool ID (0x + 64 hex)"
+                            placeholder="0x + 64 hex chars (from Prepare deposit → decode)"
                             value={receiptManualPool}
                             onChange={(e) => {
                               setReceiptManualPool(e.target.value);
@@ -1017,10 +1048,11 @@ export default function App() {
                             spellCheck={false}
                           />
                         </div>
-                        <div className="profile-paste-row" style={{ marginTop: "0.35rem" }}>
+                        <label className="muted" style={{ fontSize: "0.75rem", display: "block", marginTop: "0.5rem", marginBottom: "0.2rem" }}>2. Your launch token contract</label>
+                        <div className="profile-paste-row" style={{ marginTop: 0 }}>
                           <input
                             className="mono"
-                            placeholder="Launched token address (0x…)"
+                            placeholder="0x… token address (42 chars)"
                             value={receiptManualToken}
                             onChange={(e) => {
                               setReceiptManualToken(e.target.value);
@@ -1036,11 +1068,11 @@ export default function App() {
                               const pid = normalizePoolId(receiptManualPool.trim());
                               const tok = tryParseAddress(receiptManualToken.trim());
                               if (!pid) {
-                                setReceiptManualErr("Pool ID must look like 0x followed by exactly 64 hexadecimal characters.");
+                                setReceiptManualErr(explainPoolIdPasteError(receiptManualPool));
                                 return;
                               }
                               if (!tok) {
-                                setReceiptManualErr("Enter a valid launched token contract address (0x…).");
+                                setReceiptManualErr("Enter the launched token as a normal 0x address (40 hex digits).");
                                 return;
                               }
                               setReceiptManualErr(null);
