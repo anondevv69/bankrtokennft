@@ -25,10 +25,10 @@ function addressFromEnv(...keys: readonly string[]): Address | null {
   return null;
 }
 
-/** Bankr escrow — `VITE_ESCROW_ADDRESS` legacy name; falls back to `VITE_BANKR_ESCROW_ADDRESS`. */
+/** Bankr escrow — prefer explicit `VITE_BANKR_ESCROW_ADDRESS`; `VITE_ESCROW_ADDRESS` is legacy alias only. */
 export function bankrEscrowAddressFromEnv(): Address {
   return (
-    addressFromEnv("VITE_ESCROW_ADDRESS", "VITE_BANKR_ESCROW_ADDRESS") ??
+    addressFromEnv("VITE_BANKR_ESCROW_ADDRESS", "VITE_ESCROW_ADDRESS") ??
     getAddress(CANONICAL_BANKR_ESCROW)
   );
 }
