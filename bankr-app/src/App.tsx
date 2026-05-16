@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 import {
   useAccount,
-  useConnect,
-  useDisconnect,
   usePublicClient,
   useReadContract,
   useWriteContract,
@@ -228,7 +227,7 @@ function normalizeDisplayText(raw: string): string {
 function listingCardPlaceholderSvg(line1: string, line2: string): string {
   const a = svgTextSafe(line1, 44) || "Fee rights receipt";
   const b = svgTextSafe(line2, 56);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#15101f"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="62" text-anchor="middle" fill="#f97316" font-family="ui-monospace,monospace" font-size="11" font-weight="600" letter-spacing="0.12em">TMPR</text><text x="200" y="128" text-anchor="middle" fill="#fafafa" font-family="system-ui,sans-serif" font-size="15" font-weight="650">${a}</text>${b ? `<text x="200" y="166" text-anchor="middle" fill="#a3a3a3" font-family="ui-monospace,monospace" font-size="12">${b}</text>` : ""}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0a0a0a"/><stop offset="100%" stop-color="#15101f"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="62" text-anchor="middle" fill="#4da3ff" font-family="ui-monospace,monospace" font-size="11" font-weight="600" letter-spacing="0.12em">TMPR</text><text x="200" y="128" text-anchor="middle" fill="#fafafa" font-family="system-ui,sans-serif" font-size="15" font-weight="650">${a}</text>${b ? `<text x="200" y="166" text-anchor="middle" fill="#a3a3a3" font-family="ui-monospace,monospace" font-size="12">${b}</text>` : ""}</svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -1743,8 +1742,6 @@ export default function App() {
   const qc = useQueryClient();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { connect, connectors, isPending: connectPending, variables: connectVars } = useConnect();
-  const { disconnect } = useDisconnect();
   const { switchChain, isPending: switchPending } = useSwitchChain();
   const { writeContractAsync, isPending: writePending, error: writeError } = useWriteContract();
   const publicClient = usePublicClient();
@@ -2541,7 +2538,12 @@ export default function App() {
     <div>
       <nav className="nav">
         <div className="nav-left">
-          <div className="nav-logo">Token <span>Marketplace</span></div>
+          <div className="nav-brand">
+            <img src="/logo.png" alt="" className="nav-brand__logo" width={40} height={40} decoding="async" />
+            <div className="nav-logo">
+              Token <span>Marketplace</span>
+            </div>
+          </div>
           <div className="app-tabs" role="tablist" aria-label="Main sections">
             <button
               type="button"
@@ -2563,31 +2565,8 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div className="nav-right">
-          {isConnected && address ? (
-            <div className="wallet-pill">
-              <span className="wallet-dot" />
-              <span className="wallet-addr">{shortAddr(address)}</span>
-              <button className="gear-btn" onClick={() => disconnect()} title="Disconnect">✕</button>
-            </div>
-          ) : (
-            <div className="connect-strip">
-              {connectors.map((c, i) => {
-                const label = typeof c === "object" && "name" in c ? String((c as { name: string }).name) : "Wallet";
-                const uid = typeof c === "object" && "uid" in c ? (c as { uid: string }).uid : null;
-                const cvUid = typeof connectVars?.connector === "object" && connectVars.connector !== null && "uid" in connectVars.connector
-                  ? (connectVars.connector as { uid: string }).uid : null;
-                const busy = connectPending && uid && cvUid && uid === cvUid;
-                return (
-                  <button key={`${i}-${label}`} type="button" className="btn btn-ghost btn-sm"
-                    disabled={connectPending}
-                    onClick={() => connect({ connector: c, chainId: MVP_CHAIN_ID })}>
-                    {busy ? "…" : label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        <div className="nav-right nav-connect">
+          <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
         </div>
       </nav>
 
@@ -2767,21 +2746,8 @@ export default function App() {
           {!isConnected && (
             <div className="profile-gate">
               <p>Connect a wallet to see your tokens and listings.</p>
-              <div className="connect-strip">
-                {connectors.map((c, i) => {
-                  const label = typeof c === "object" && "name" in c ? String((c as { name: string }).name) : "Wallet";
-                  const uid = typeof c === "object" && "uid" in c ? (c as { uid: string }).uid : null;
-                  const cvUid = typeof connectVars?.connector === "object" && connectVars?.connector !== null && "uid" in connectVars.connector
-                    ? (connectVars.connector as { uid: string }).uid : null;
-                  const busy = connectPending && uid && cvUid && uid === cvUid;
-                  return (
-                    <button key={`${i}-${label}`} type="button" className="btn btn-ghost btn-sm"
-                      disabled={connectPending}
-                      onClick={() => connect({ connector: c, chainId: MVP_CHAIN_ID })}>
-                      {busy ? "…" : label}
-                    </button>
-                  );
-                })}
+              <div className="profile-gate__connect">
+                <ConnectButton />
               </div>
             </div>
           )}
@@ -2803,9 +2769,7 @@ export default function App() {
                 >
                   Copy address
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => disconnect()}>
-                  Disconnect
-                </button>
+                <ConnectButton showBalance={false} chainStatus="none" accountStatus="full" />
               </div>
             </div>
           )}
@@ -3093,7 +3057,7 @@ export default function App() {
                                             minWidth: 0,
                                             padding: "0.35rem 0.5rem",
                                             borderRadius: 8,
-                                            border: `1px solid ${draftIsV4 ? "rgba(249,115,22,0.7)" : "rgba(63, 63, 70, 0.55)"}`,
+                                            border: `1px solid ${draftIsV4 ? "rgba(77, 163, 255, 0.55)" : "rgba(63, 63, 70, 0.55)"}`,
                                             background: "rgba(9, 9, 11, 0.6)",
                                             color: "inherit",
                                           }}

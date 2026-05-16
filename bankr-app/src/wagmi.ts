@@ -1,5 +1,5 @@
-import { createConfig, http } from "wagmi";
-import { coinbaseWallet, injected, metaMask, walletConnect } from "wagmi/connectors";
+import { getDefaultConfig } from "@rainbow-me/rainbowkit";
+import { http } from "wagmi";
 import { MVP_CHAIN } from "./chain";
 
 /** Prefer a dedicated RPC in production (`VITE_RPC_URL`). Public endpoint is rate-limited. */
@@ -14,45 +14,28 @@ if (typeof import.meta.env.DEV !== "undefined" && import.meta.env.DEV && rpc.inc
   );
 }
 
-/** Reown / WalletConnect Cloud project id (free). Either env name works. */
+/** Reown / WalletConnect Cloud project id (free). Either env name works. Required for RainbowKit + mobile wallets. */
 const wcProjectIdRaw =
   (typeof import.meta.env.VITE_WALLETCONNECT_PROJECT_ID === "string"
     ? import.meta.env.VITE_WALLETCONNECT_PROJECT_ID.trim()
     : "") ||
   (typeof import.meta.env.VITE_REOWN_PROJECT_ID === "string" ? import.meta.env.VITE_REOWN_PROJECT_ID.trim() : "");
 
-/** `true` when WalletConnect (QR / mobile) is registered — requires a Cloud project id. */
 export const walletConnectConfigured = wcProjectIdRaw.length > 0;
 
-const walletConnectConnector = walletConnectConfigured
-  ? walletConnect({
-      projectId: wcProjectIdRaw,
-      metadata: {
-        name: "Token Marketplace",
-        description: "Token Marketplace — Base",
-        url: typeof window !== "undefined" ? window.location.origin : "https://localhost",
-        icons: [],
-      },
-      showQrModal: true,
-    })
-  : null;
+if (!walletConnectConfigured && typeof import.meta.env.DEV !== "undefined" && import.meta.env.DEV) {
+  console.warn(
+    "[token-marketplace] Set VITE_WALLETCONNECT_PROJECT_ID (free at https://cloud.reown.com) for WalletConnect / QR wallets in RainbowKit.",
+  );
+}
 
-/**
- * MetaMask and Coinbase first; WalletConnect next (QR / Trust / Rainbow / etc.); injected last
- * (Rabby, Brave, other EIP-1193 wallets). WalletConnect only appears when `walletConnectConfigured`.
- */
-const connectors = [
-  metaMask(),
-  ...(walletConnectConnector ? [walletConnectConnector] : []),
-  coinbaseWallet({ appName: "Token Marketplace" }),
-  injected({ shimDisconnect: true }),
-];
-
-/** Single-chain MVP: Base (8453) only. */
-export const config = createConfig({
+/** Single-chain MVP: Base (8453) only — RainbowKit handles wallet list + connect UI. */
+export const config = getDefaultConfig({
+  appName: "Token Marketplace",
+  projectId: walletConnectConfigured ? wcProjectIdRaw : "00000000000000000000000000000000",
   chains: [MVP_CHAIN],
-  connectors,
   transports: {
     [MVP_CHAIN.id]: http(rpc),
   },
+  ssr: false,
 });

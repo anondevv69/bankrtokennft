@@ -49,23 +49,23 @@ export function bfrrReceiptPreviewDataUri(opts: BfrrPreviewOpts): string {
 <stop offset="1" stop-color="#1a0f18"/>
 </linearGradient>
 <linearGradient id="chip" x1="0" y1="0" x2="1" y2="0">
-<stop offset="0" stop-color="#fb923c"/>
-<stop offset="1" stop-color="#ea580c"/>
+<stop offset="0" stop-color="#7cc4ff"/>
+<stop offset="1" stop-color="#4da3ff"/>
 </linearGradient>
 </defs>
 <rect width="420" height="300" fill="url(#bg)" rx="20"/>
-<circle cx="332" cy="228" r="118" fill="#f97316" fill-opacity="0.07"/>
-<circle cx="64" cy="256" r="76" fill="#7c3aed" fill-opacity="0.045"/>
+<circle cx="332" cy="228" r="118" fill="#4da3ff" fill-opacity="0.08"/>
+<circle cx="64" cy="256" r="76" fill="#38bdf8" fill-opacity="0.04"/>
 <rect x="1" y="1" width="418" height="298" rx="19" fill="none" stroke="#3f3f46" stroke-opacity="0.85" stroke-width="1"/>
-<rect x="18" y="48" width="384" height="236" rx="16" fill="#09090b" stroke="#f97316" stroke-opacity="0.25" stroke-width="1"/>
-<rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#fdba74" stroke-opacity="0.45"/>
+<rect x="18" y="48" width="384" height="236" rx="16" fill="#09090b" stroke="#4da3ff" stroke-opacity="0.22" stroke-width="1"/>
+<rect x="286" y="58" width="100" height="28" rx="14" fill="url(#chip)" fill-opacity="0.18" stroke="#7cc4ff" stroke-opacity="0.4"/>
 <text x="336" y="56" font-family="ui-monospace,monospace" font-size="8" fill="#a1a1aa" text-anchor="middle" font-weight="600" letter-spacing="0.06">LAUNCH</text>
-<text x="336" y="76" font-family="ui-monospace,monospace" font-size="10" fill="#fff7ed" text-anchor="middle" font-weight="700" letter-spacing="1.1">${factUpper}</text>
+<text x="336" y="76" font-family="ui-monospace,monospace" font-size="10" fill="#e8f4ff" text-anchor="middle" font-weight="700" letter-spacing="1.1">${factUpper}</text>
 <text x="32" y="82" font-family="ui-monospace,monospace" font-size="12" fill="#a1a1aa" font-weight="600">TOKEN MARKETPLACE</text>
 <text x="32" y="118" font-family="ui-monospace,monospace" font-size="30" fill="#fafafa" font-weight="800">TMPR #${serial}</text>
 <rect x="32" y="130" width="356" height="${showName ? 58 : 48}" rx="12" fill="#18181b" stroke="#27272f" stroke-width="1"/>
 <text x="48" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TICKER</text>
-<text x="48" y="172" font-family="ui-monospace,monospace" font-size="20" fill="#fdba74" font-weight="700">${ticker}</text>
+<text x="48" y="172" font-family="ui-monospace,monospace" font-size="20" fill="#7cc4ff" font-weight="700">${ticker}</text>
 ${showName ? `<text x="210" y="152" font-family="ui-monospace,monospace" font-size="9" fill="#71717a" font-weight="600">TOKEN NAME</text><text x="210" y="172" font-family="ui-monospace,monospace" font-size="14" fill="#e4e4e7" font-weight="600">${tokenName}</text>` : ""}
 <line x1="32" y1="${showName ? 200 : 194}" x2="388" y2="${showName ? 200 : 194}" stroke="#27272f" stroke-width="1"/>
 <text x="32" y="${yLaunch}" font-family="ui-monospace,monospace" font-size="10" fill="#71717a" font-weight="600">LAUNCH</text>
