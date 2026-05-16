@@ -3558,14 +3558,14 @@ export default function App() {
       <footer className="site-footer">
         <div className="site-footer__token">
           <a
-            href="https://basescan.org/token/0x935e13a28849095db45e63040f109c34b757aba3"
+            href="https://dexscreener.com/base/0x935e13a28849095db45e63040f109c34b757aba3"
             target="_blank"
             rel="noopener noreferrer"
             className="site-footer__token-link"
           >
             TokenMarketplace <span className="site-footer__token-ticker">$TMP</span>
+            <span className="site-footer__token-addr mono">0x935e…aba3</span>
           </a>
-          <span className="site-footer__token-addr mono">0x935e…aba3</span>
         </div>
         <div className="site-footer__contracts">
           <span className="site-footer__contracts-label">Contracts on Base</span>

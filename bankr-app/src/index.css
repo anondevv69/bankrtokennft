@@ -1708,6 +1708,11 @@ input::placeholder { color: var(--muted); }
 }
 
 .site-footer__token-link {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem 0.65rem;
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--text);
@@ -1719,6 +1724,10 @@ input::placeholder { color: var(--muted); }
   color: var(--accent);
 }
 
+.site-footer__token-link:hover .site-footer__token-addr {
+  color: var(--accent);
+}
+
 .site-footer__token-ticker {
   color: var(--accent);
   font-weight: 700;
@@ -1726,6 +1735,7 @@ input::placeholder { color: var(--muted); }
 
 .site-footer__token-addr {
   font-size: 0.72rem;
+  font-weight: 400;
   color: var(--muted-2);
 }
 
