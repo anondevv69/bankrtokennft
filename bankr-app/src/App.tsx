@@ -3556,6 +3556,20 @@ export default function App() {
       {writeError && (
         <div className="error-bar">{writeError.message.slice(0, 120)}</div>
       )}
+
+      <footer className="site-footer">
+        <p className="site-footer__text">
+          Made with love by{" "}
+          <a
+            href="https://farcaster.xyz/rayblanco.eth"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            rayblanco.eth
+          </a>{" "}
+          {"<3"}
+        </p>
+      </footer>
     </div>
   );
 }
