@@ -12,7 +12,13 @@ import { EscrowWizardClanker } from "./EscrowWizardClanker";
 import { EscrowWizardClankerV4 } from "./EscrowWizardClankerV4";
 import type { EscrowWizardProps } from "./escrowWizardTypes";
 import { rowClankerListingReady, rowClankerLockerVersion } from "./lib/clankerDetail";
-import { clankerEscrowAddressFromEnv, clankerEscrowV4AddressFromEnv } from "./lib/deployAddresses";
+import {
+  CANONICAL_BANKR_ESCROW,
+  clankerEscrowAddressFromEnv,
+  clankerEscrowV4AddressFromEnv,
+  defaultReceiptCollectionFromEnv,
+  isLegacyBankrEscrow,
+} from "./lib/deployAddresses";
 
 export type { EscrowWizardProps } from "./escrowWizardTypes";
 
@@ -207,6 +213,34 @@ function EscrowWizardBankr({ row, escrowAddress, userAddress, onClose, onDone }:
     if (!publicClient) return;
     setErr(null);
     setNext({ kind: "loading" });
+
+    if (isLegacyBankrEscrow(escrowAddress)) {
+      setNext({
+        kind: "blocked",
+        reason: `This listing would mint on legacy escrow ${escrowAddress} (BFRR collection), not Token Marketplace. Rebuild the site with VITE_BANKR_ESCROW_ADDRESS=${CANONICAL_BANKR_ESCROW} and redeploy Vercel.`,
+      });
+      return;
+    }
+
+    try {
+      const escrowReceipt = await publicClient.readContract({
+        address: escrowAddress,
+        abi: bankrEscrowAbi,
+        functionName: "receipt",
+      });
+      const expected = defaultReceiptCollectionFromEnv();
+      if (getAddress(escrowReceipt as Address).toLowerCase() !== expected.toLowerCase()) {
+        setNext({
+          kind: "blocked",
+          reason: `Bankr escrow receipt is ${escrowReceipt as string}, but this app expects ${expected} (Token Marketplace / OpenSea). Wrong VITE_BANKR_ESCROW_ADDRESS in the production build.`,
+        });
+        return;
+      }
+    } catch {
+      setNext({ kind: "blocked", reason: "Could not read escrow.receipt() on Base — check RPC." });
+      return;
+    }
+
     const pid = rowPoolIdHex(row);
     const launched = rowLaunchedToken(row);
     if (!pid || !launched) {

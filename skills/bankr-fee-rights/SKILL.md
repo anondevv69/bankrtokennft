@@ -29,8 +29,9 @@ These are **example production addresses** from this project’s Base deploy; **
 
 | Role | Address |
 |------|---------|
-| **BankrEscrowV3** | `0x7BD14E540Ac55E229587Bf3Cd0Fc815A7afcf461` *(latest deploy — verify)* |
-| **Creator Fee Rights receipt (`CFR`)** | `0x02441aDdC542A3a3283c4468780eB876F9ADA8BA` *(from `escrow.receipt()` — verify)* |
+| **BankrEscrowV3** | `0x6238698212D91845cD1c004DE85951055bB5b292` *(Token Marketplace bundle — verify)* |
+| **TMPR receipt (`CFR`)** | `0xCD66340D93E212bEC6Db1b22476e4f1276380C3e` *(from `escrow.receipt()` — verify)* |
+| **Legacy (do not use)** | Escrow `0x7BD14E540Ac55E229587Bf3Cd0Fc815A7afcf461` → BFRR `0x02441aDdC542A3a3283c4468780eB876F9ADA8BA` |
 | **FeeRightsFixedSale** (marketplace) | From **`VITE_MARKETPLACE_ADDRESS`** / operator docs *(verify on BaseScan)* |
 
 Other addresses (**fee manager**, **poolId**, **token0/token1**) are **per launch** — resolve from your app’s metadata, Doppler/Bankr public APIs, or on-chain reads. Wrong `poolId` / token order ⇒ `prepareDeposit` reverts or wrong pool.

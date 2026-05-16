@@ -62,6 +62,8 @@ import {
   bankrEscrowAddressFromEnv,
   clankerEscrowAddressFromEnv,
   clankerEscrowV4AddressFromEnv,
+  defaultReceiptCollectionFromEnv,
+  DEFAULT_LEGACY_RECEIPT_ALIASES,
 } from "./lib/deployAddresses";
 import { resolveReceiptRedeemEscrow } from "./lib/receiptRedeemEscrow";
 import {
@@ -1858,7 +1860,7 @@ export default function App() {
   const [listingBusyReceiptKey, setListingBusyReceiptKey] = useState<string | null>(null);
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
-  const collection = tryParseAddress(envAddr("VITE_DEFAULT_RECEIPT_COLLECTION"));
+  const collection = defaultReceiptCollectionFromEnv();
   const openSeaCollectionSlug = import.meta.env.VITE_OPENSEA_COLLECTION_SLUG || "token-marketplace-981215191";
   const receiptCollectionAliases = useMemo(() => envAddrCsvList("VITE_RECEIPT_COLLECTION_ALIASES"), []);
 
@@ -1872,8 +1874,9 @@ export default function App() {
       seen.add(k);
       out.push(a);
     };
-    push(collection ?? undefined);
+    push(collection);
     for (const a of receiptCollectionAliases) push(a);
+    for (const a of DEFAULT_LEGACY_RECEIPT_ALIASES) push(a);
     return out;
   }, [collection, receiptCollectionAliases]);
 

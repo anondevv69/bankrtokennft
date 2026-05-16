@@ -2,6 +2,13 @@
 export const bankrEscrowAbi = [
   {
     type: "function",
+    name: "receipt",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
     name: "prepareDeposit",
     stateMutability: "nonpayable",
     inputs: [
