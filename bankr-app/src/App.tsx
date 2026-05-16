@@ -87,6 +87,7 @@ import {
   clankerV4IndexSummary,
 } from "./lib/clankerV4Rewards";
 import { resolveImportedClankerRow } from "./lib/clankerManualImport";
+import { OpenSeaListingCard } from "./OpenSeaListingCard";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -2720,36 +2721,11 @@ export default function App() {
               </p>
               <div className="listings-grid">
                 {openSeaData.listings.map((osl) => (
-                  <div key={osl.orderHash ?? osl.tokenId ?? Math.random()} className="listing-card opensea-card">
-                    <div className="listing-card__header">
-                      <span className="listing-card__title mono">
-                        {osl.tokenId ? `TMPR #${osl.tokenId}` : "TMPR NFT"}
-                      </span>
-                      <span className="badge badge--opensea">OpenSea</span>
-                    </div>
-                    <div className="listing-card__price">
-                      {osl.priceEth
-                        ? <><strong>{osl.priceEth}</strong> {osl.priceCurrency}</>
-                        : <span className="muted">Price unknown</span>
-                      }
-                    </div>
-                    {osl.maker && (
-                      <p className="listing-card__seller muted mono">
-                        Seller: {osl.maker.slice(0, 6)}…{osl.maker.slice(-4)}
-                      </p>
-                    )}
-                    {osl.permalink && (
-                      <a
-                        href={osl.permalink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-ghost btn-sm"
-                        style={{ marginTop: "0.5rem", width: "100%", textAlign: "center" }}
-                      >
-                        Buy on OpenSea ↗
-                      </a>
-                    )}
-                  </div>
+                  <OpenSeaListingCard
+                    key={osl.orderHash ?? osl.tokenId ?? Math.random()}
+                    listing={osl}
+                    collection={collection}
+                  />
                 ))}
               </div>
             </section>
