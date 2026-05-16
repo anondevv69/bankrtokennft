@@ -1690,9 +1690,48 @@ input::placeholder { color: var(--muted); }
 /* ── Site footer ── */
 .site-footer {
   margin-top: 3rem;
-  padding: 1.25rem 0 0.5rem;
+  padding: 1.5rem 0 0.75rem;
   border-top: 1px solid var(--border);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.site-footer__contracts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.site-footer__contracts-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.site-footer__contracts-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 0.75rem;
+}
+
+.site-footer__contracts-links a {
+  font-size: 0.75rem;
+  color: var(--muted-2);
+  text-decoration: none;
+  font-family: var(--mono);
+  transition: color 0.15s;
+}
+
+.site-footer__contracts-links a:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .site-footer__text {

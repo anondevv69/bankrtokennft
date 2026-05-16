@@ -3556,6 +3556,39 @@ export default function App() {
       )}
 
       <footer className="site-footer">
+        <div className="site-footer__contracts">
+          <span className="site-footer__contracts-label">Contracts on Base</span>
+          <div className="site-footer__contracts-links">
+            <a
+              href="https://basescan.org/address/0xCD66340D93E212bEC6Db1b22476e4f1276380C3e#code"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              TMPR Receipt NFT
+            </a>
+            <a
+              href="https://basescan.org/address/0x6238698212D91845cD1c004DE85951055bB5b292#code"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Bankr Escrow
+            </a>
+            <a
+              href="https://basescan.org/address/0x5Cf158b5915E5b0764Ca87760b0e46beF7A527E3#code"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Clanker Escrow v3
+            </a>
+            <a
+              href="https://basescan.org/address/0x3546A98C09fc5a3E162d510DB331C4dcEdB6EADa#code"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Clanker Escrow v4
+            </a>
+          </div>
+        </div>
         <p className="site-footer__text">
           Made with love by{" "}
           <a
