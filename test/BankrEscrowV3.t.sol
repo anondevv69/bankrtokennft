@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {IERC721Errors} from "openzeppelin-contracts/contracts/interfaces/draft-IERC6093.sol";
 import {BankrEscrowV3} from "../src/BankrEscrowV3.sol";
 import {BankrFeeRightsReceipt} from "../src/BankrFeeRightsReceipt.sol";
+import {Base64} from "openzeppelin-contracts/contracts/utils/Base64.sol";
+import {Strings} from "openzeppelin-contracts/contracts/utils/Strings.sol";
 import {MockERC20, MockBankrFeesManagerV2} from "./MockBankrFeesV2.sol";
 
 contract BankrEscrowV3Test is Test {
@@ -53,6 +55,45 @@ contract BankrEscrowV3Test is Test {
         assertEq(p.token0, address(token0));
         assertEq(p.token1, address(token1));
         assertEq(p.seller, SELLER);
+    }
+
+    function testTokenUriIncludesLaunchedTokenContractTrait() public {
+        _prepareAndTransfer();
+        vm.prank(SELLER);
+        uint256 tokenId = escrow.finalizeDeposit(POOL_ID);
+
+        string memory json = _jsonFromDataUri(escrow.receipt().tokenURI(tokenId));
+        assertTrue(_searchSubstr(json, "Token contract"));
+        // Mock WETH is not `WETH_BASE`; `_launchedToken` uses token0 when neither leg matches.
+        assertTrue(_searchSubstr(json, Strings.toHexString(address(token0))));
+    }
+
+    function _jsonFromDataUri(string memory uri) private pure returns (string memory) {
+        bytes memory u = bytes(uri);
+        uint256 prefix = 29;
+        require(u.length > prefix, "short uri");
+        bytes memory payload = new bytes(u.length - prefix);
+        for (uint256 i = 0; i < payload.length; i++) {
+            payload[i] = u[i + prefix];
+        }
+        return string(Base64.decode(string(payload)));
+    }
+
+    function _searchSubstr(string memory haystack, string memory needle) private pure returns (bool) {
+        bytes memory h = bytes(haystack);
+        bytes memory n = bytes(needle);
+        if (n.length == 0 || n.length > h.length) return false;
+        for (uint256 i = 0; i <= h.length - n.length; i++) {
+            bool hit = true;
+            for (uint256 j = 0; j < n.length; j++) {
+                if (h[i + j] != n[j]) {
+                    hit = false;
+                    break;
+                }
+            }
+            if (hit) return true;
+        }
+        return false;
     }
 
     function testRedeemAfterNftTransferWithdrawsFeesToBuyer() public {

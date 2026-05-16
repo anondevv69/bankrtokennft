@@ -113,55 +113,68 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         ownerOf(tokenId); // reverts ERC721NonexistentToken if burned / never minted
-        Position memory pos = _positions[tokenId];
-        uint256 serial = _serials[tokenId];
+        return _tokenUriFor(_positions[tokenId], _serials[tokenId]);
+    }
 
+    function _tokenUriFor(Position memory pos, uint256 serial) private view returns (string memory) {
+        string memory sSerial = Strings.toString(serial);
+        address launched = _launchedToken(pos);
+        string memory svg = _buildSvgFor(pos, sSerial, launched);
+        string memory attrs = _metadataAttributesFor(pos, sSerial, launched);
+        string memory json = _jsonMetadataFor(pos, sSerial, svg, attrs);
+        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+    }
+
+    function _buildSvgFor(Position memory pos, string memory sSerial, address launched)
+        private
+        view
+        returns (string memory)
+    {
         string memory sym0 = _trySymbol(pos.token0);
         string memory sym1 = _trySymbol(pos.token1);
         string memory ticker = _launchedTicker(pos, sym0, sym1);
         string memory tokenName = _launchedTokenName(pos, sym0, sym1);
         string memory fact = bytes(pos.factoryName).length > 0 ? pos.factoryName : "Unknown";
-        string memory sSerial = Strings.toString(serial);
-
-        string memory svg = _buildSVG(pos, sSerial, ticker, tokenName, fact);
-
-        string memory json = _encodeTokenMetadataJson(pos, sSerial, ticker, tokenName, fact, svg);
-
-        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
+        return _buildSVG(pos, sSerial, ticker, tokenName, fact, launched);
     }
 
-    /// @dev Split from `tokenURI` to avoid IR stack-too-deep.
-    function _encodeTokenMetadataJson(
-        Position memory pos,
+    function _metadataAttributesFor(Position memory pos, string memory sSerial, address launched)
+        private
+        view
+        returns (string memory)
+    {
+        string memory sym0 = _trySymbol(pos.token0);
+        string memory sym1 = _trySymbol(pos.token1);
+        string memory ticker = _launchedTicker(pos, sym0, sym1);
+        string memory tokenName = _launchedTokenName(pos, sym0, sym1);
+        string memory fact = bytes(pos.factoryName).length > 0 ? pos.factoryName : "Unknown";
+        return _metadataAttributes(sSerial, fact, ticker, tokenName, launched, pos.seller, pos.feeManager);
+    }
+
+    function _jsonMetadataFor(Position memory pos, string memory sSerial, string memory svg, string memory attrs)
+        private
+        view
+        returns (string memory)
+    {
+        string memory sym0 = _trySymbol(pos.token0);
+        string memory sym1 = _trySymbol(pos.token1);
+        string memory ticker = _launchedTicker(pos, sym0, sym1);
+        string memory tokenName = _launchedTokenName(pos, sym0, sym1);
+        string memory fact = bytes(pos.factoryName).length > 0 ? pos.factoryName : "Unknown";
+        return _encodeTokenMetadataJson(sSerial, fact, ticker, tokenName, pos.poolId, svg, attrs);
+    }
+
+    function _metadataAttributes(
         string memory sSerial,
+        string memory fact,
         string memory ticker,
         string memory tokenName,
-        string memory fact,
-        string memory svg
+        address launched,
+        address seller,
+        address feeManager
     ) private pure returns (string memory) {
-        string memory head = string.concat(
-            '{"name":"Token Marketplace #',
-            sSerial,
-            " - ",
-            _safe(fact),
-            '",',
-            '"description":"Launch factory: ',
-            _safe(fact),
-            ". Token Marketplace fee receipt on Base for ",
-            _safe(ticker),
-            " (",
-            _safe(tokenName),
-            "). Pool ",
-            _shortB32(pos.poolId),
-            ". Seller ",
-            _shortAddr(pos.seller),
-            '."',
-            ',"image":"data:image/svg+xml;base64,',
-            Base64.encode(bytes(svg)),
-            '",',
-            '"attributes":['
-        );
-        string memory tail = string.concat(
+        return string.concat(
+            "[",
             '{"trait_type":"Serial","value":',
             sSerial,
             "},",
@@ -177,15 +190,51 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
             '{"trait_type":"Pair","value":"',
             _safe(ticker),
             '"},',
+            '{"trait_type":"Token contract","value":"',
+            Strings.toHexString(launched),
+            '"},',
             '{"trait_type":"Original Seller","value":"',
-            Strings.toHexString(pos.seller),
+            Strings.toHexString(seller),
             '"},',
             '{"trait_type":"Fee Manager","value":"',
-            Strings.toHexString(pos.feeManager),
+            Strings.toHexString(feeManager),
             '"}',
-            "]}"
+            "]"
         );
-        return string.concat(head, tail);
+    }
+
+    /// @dev Split from `tokenURI` to avoid IR stack-too-deep.
+    function _encodeTokenMetadataJson(
+        string memory sSerial,
+        string memory fact,
+        string memory ticker,
+        string memory tokenName,
+        bytes32 poolId,
+        string memory svg,
+        string memory attrs
+    ) private pure returns (string memory) {
+        return string.concat(
+            '{"name":"Token Marketplace #',
+            sSerial,
+            " - ",
+            _safe(fact),
+            '",',
+            '"description":"Launch factory: ',
+            _safe(fact),
+            ". Token Marketplace fee receipt on Base for ",
+            _safe(ticker),
+            " (",
+            _safe(tokenName),
+            "). Pool ",
+            _shortB32(poolId),
+            '."',
+            ',"image":"data:image/svg+xml;base64,',
+            Base64.encode(bytes(svg)),
+            '",',
+            '"attributes":',
+            attrs,
+            "}"
+        );
     }
 
     // ── SVG construction ─────────────────────────────────────────────────────
@@ -195,7 +244,8 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
         string memory sSerial,
         string memory ticker,
         string memory tokenName,
-        string memory fact
+        string memory fact,
+        address launched
     ) private pure returns (string memory) {
         bool compactLayout = keccak256(bytes(_safe(ticker))) == keccak256(bytes(_safe(tokenName)));
         return string.concat(
@@ -203,7 +253,7 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
             _svgDefs(),
             _svgFrame(fact),
             _svgHeader(sSerial, ticker, tokenName),
-            _svgBody(pos, sSerial, compactLayout, fact),
+            _svgBody(pos, sSerial, compactLayout, fact, launched),
             "</svg>"
         );
     }
@@ -275,7 +325,7 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
         );
     }
 
-    function _svgBody(Position memory pos, string memory sSerial, bool compact, string memory fact)
+    function _svgBody(Position memory pos, string memory sSerial, bool compact, string memory fact, address launched)
         private
         pure
         returns (string memory)
@@ -283,24 +333,26 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
         if (compact) {
             return string.concat(
                 _svgRow("210", "LAUNCH", _safe(fact)),
-                _svgRow("228", "POOL ID", _shortB32(pos.poolId)),
-                _svgRow("246", "SELLER", _shortAddr(pos.seller)),
-                _svgRow("264", "FEE MGR", _shortAddr(pos.feeManager)),
-                '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
-                '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
-                '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
+                _svgRow("224", "TOKEN", _shortAddr(launched)),
+                _svgRow("238", "POOL ID", _shortB32(pos.poolId)),
+                _svgRow("252", "SELLER", _shortAddr(pos.seller)),
+                _svgRow("266", "FEE MGR", _shortAddr(pos.feeManager)),
+                '<line x1="32" y1="276" x2="388" y2="276" stroke="#27272f" stroke-width="1"/>',
+                '<text x="32" y="290" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
+                '<text x="388" y="290" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
                 sSerial,
                 "</text>"
             );
         }
         return string.concat(
-            _svgRow("212", "LAUNCH", _safe(fact)),
-            _svgRow("230", "POOL ID", _shortB32(pos.poolId)),
-            _svgRow("248", "SELLER", _shortAddr(pos.seller)),
-            _svgRow("266", "FEE MGR", _shortAddr(pos.feeManager)),
-            '<line x1="32" y1="278" x2="388" y2="278" stroke="#27272f" stroke-width="1"/>',
-            '<text x="32" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
-            '<text x="388" y="292" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
+            _svgRow("208", "LAUNCH", _safe(fact)),
+            _svgRow("222", "TOKEN", _shortAddr(launched)),
+            _svgRow("236", "POOL ID", _shortB32(pos.poolId)),
+            _svgRow("250", "SELLER", _shortAddr(pos.seller)),
+            _svgRow("264", "FEE MGR", _shortAddr(pos.feeManager)),
+            '<line x1="32" y1="276" x2="388" y2="276" stroke="#27272f" stroke-width="1"/>',
+            '<text x="32" y="290" font-family="ui-monospace,monospace" font-size="9" fill="#52525b">Token Marketplace - Base mainnet</text>',
+            '<text x="388" y="290" font-family="ui-monospace,monospace" font-size="9" fill="#52525b" text-anchor="end">#',
             sSerial,
             "</text>"
         );
@@ -326,6 +378,13 @@ contract BankrFeeRightsReceipt is ERC721, ERC2981, Ownable {
     }
 
     // ── Launched-token labels (WETH leg hidden) ───────────────────────────────
+
+    /// @dev Launched ERC-20 on Base (non-WETH pool leg when paired with WETH).
+    function _launchedToken(Position memory pos) private pure returns (address) {
+        if (pos.token0 == WETH_BASE) return pos.token1;
+        if (pos.token1 == WETH_BASE) return pos.token0;
+        return pos.token0;
+    }
 
     function _launchedTicker(Position memory pos, string memory sym0, string memory sym1)
         private

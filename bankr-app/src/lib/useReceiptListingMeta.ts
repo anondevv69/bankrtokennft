@@ -138,7 +138,13 @@ export function useReceiptListingMeta(
     const launchFactory =
       factoryOnChain || traitFromReceiptUri(rawUri, "Launch factory") || null;
 
-    const launchedToken = poolLabels?.launched ?? launchedFromPair ?? null;
+    const launchedFromTrait = traitFromReceiptUri(rawUri, "Token contract");
+    const launchedToken =
+      poolLabels?.launched ??
+      launchedFromPair ??
+      (launchedFromTrait && isAddress(launchedFromTrait, { strict: false })
+        ? getAddress(launchedFromTrait)
+        : null);
 
     return {
       loading,
