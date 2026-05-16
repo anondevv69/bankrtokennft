@@ -1776,13 +1776,6 @@ export default function App() {
   const [mainTab, setMainTab] = useState<"home" | "profile">("home");
 
   useEffect(() => {
-    const root = document.getElementById("root");
-    if (!root) return;
-    root.classList.toggle("layout-wide", mainTab === "home");
-    return () => root.classList.remove("layout-wide");
-  }, [mainTab]);
-
-  useEffect(() => {
     if (!address) {
       setClankerImportByToken({});
       clankerImportsHydratedRef.current = null;
@@ -1859,7 +1852,7 @@ export default function App() {
 
   const marketplace = tryParseAddress(envAddr("VITE_MARKETPLACE_ADDRESS"));
   const collection = defaultReceiptCollectionFromEnv();
-  const openSeaCollectionSlug = import.meta.env.VITE_OPENSEA_COLLECTION_SLUG || "token-marketplace-981215191";
+  const openSeaCollectionSlug = import.meta.env.VITE_OPENSEA_COLLECTION_SLUG || "tokenmarketplace";
   const receiptCollectionAliases = useMemo(() => envAddrCsvList("VITE_RECEIPT_COLLECTION_ALIASES"), []);
 
   const receiptScanTargets = useMemo(() => {
@@ -2713,8 +2706,13 @@ export default function App() {
           {/* quiet link even when no OS listings are live */}
           {(!openSeaData || (openSeaData.ok && openSeaData.listings.length === 0)) && (
             <p className="muted" style={{ textAlign: "center", fontSize: "0.78rem", marginTop: "0.25rem" }}>
-              TMPR receipts are also tradable on{" "}
-              <a href={openSeaCollectionUrl(openSeaCollectionSlug)} target="_blank" rel="noreferrer">OpenSea ↗</a>
+              <a
+                href="https://opensea.io/collection/tokenmarketplace"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Shop on OpenSea ↗
+              </a>
             </p>
           )}
         </>

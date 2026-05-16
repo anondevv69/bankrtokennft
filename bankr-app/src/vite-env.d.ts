@@ -26,7 +26,7 @@ interface ImportMetaEnv {
   readonly VITE_CLANKER_V4_DEFAULT_LOCKER?: string;
   /** `ClankerEscrowV4` — required for listing Clanker v4 tokens end-to-end. */
   readonly VITE_CLANKER_V4_ESCROW_ADDRESS?: string;
-  /** OpenSea collection slug for TMPR (defaults to `token-marketplace-981215191`). */
+  /** OpenSea collection slug for TMPR (defaults to `tokenmarketplace`). */
   readonly VITE_OPENSEA_COLLECTION_SLUG?: string;
 }
 

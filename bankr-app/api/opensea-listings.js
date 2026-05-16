@@ -15,7 +15,7 @@
  */
 
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
-const DEFAULT_COLLECTION_SLUG = "token-marketplace-981215191";
+const DEFAULT_COLLECTION_SLUG = "tokenmarketplace";
 const BASE_CHAIN = "base";
 
 export default async function handler(req, res) {

@@ -46,7 +46,7 @@ export function openSeaAssetUrl(contract: string, tokenId: string | number): str
 }
 
 /** OpenSea collection URL. */
-export function openSeaCollectionUrl(slug = "token-marketplace-981215191"): string {
+export function openSeaCollectionUrl(slug = "tokenmarketplace"): string {
   return `https://opensea.io/collection/${slug}`;
 }
 
