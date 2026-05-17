@@ -2551,15 +2551,6 @@ export default function App() {
             <button
               type="button"
               role="tab"
-              aria-selected={mainTab === "group"}
-              className={`app-tab${mainTab === "group" ? " app-tab--active" : ""}`}
-              onClick={() => setMainTab("group")}
-            >
-              Group Buy
-            </button>
-            <button
-              type="button"
-              role="tab"
               aria-selected={mainTab === "profile"}
               className={`app-tab${mainTab === "profile" ? " app-tab--active" : ""}`}
               onClick={() => setMainTab("profile")}
