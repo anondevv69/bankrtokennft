@@ -1,18 +1,12 @@
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 import { http } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
-import { MVP_CHAIN, MVP_CHAIN_ID } from "./chain";
+import { MVP_CHAIN } from "./chain";
 
 /** Prefer a dedicated RPC in production (`VITE_RPC_URL`). Public endpoint is rate-limited. */
-const defaultPublicRpc =
-  MVP_CHAIN_ID === baseSepolia.id
-    ? "https://sepolia.base.org"
-    : "https://mainnet.base.org";
-
 const rpc =
   typeof import.meta.env.VITE_RPC_URL === "string" && import.meta.env.VITE_RPC_URL.trim()
     ? import.meta.env.VITE_RPC_URL.trim()
-    : defaultPublicRpc;
+    : "https://mainnet.base.org";
 
 if (typeof import.meta.env.DEV !== "undefined" && import.meta.env.DEV && rpc.includes("mainnet.base.org")) {
   console.warn(

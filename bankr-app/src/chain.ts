@@ -1,22 +1,12 @@
-import { base, baseSepolia } from "wagmi/chains";
-import type { Chain } from "wagmi/chains";
+import { base } from "wagmi/chains";
 
-/** Allow Base Sepolia for local/testnet dev via VITE_CHAIN_ID=84532. */
-const rawChainId =
-  typeof import.meta.env.VITE_CHAIN_ID === "string"
-    ? Number(import.meta.env.VITE_CHAIN_ID.trim())
-    : base.id;
+/** MVP: Base mainnet only (fee-manager–compatible launches). Other chains are not supported in this build. */
+export const MVP_CHAIN = base;
+export const MVP_CHAIN_ID = base.id;
 
-const SUPPORTED: Record<number, Chain> = {
-  [base.id]: base,
-  [baseSepolia.id]: baseSepolia,
-};
-
-export const MVP_CHAIN: Chain = SUPPORTED[rawChainId] ?? base;
-export const MVP_CHAIN_ID: number = MVP_CHAIN.id;
-
-if (MVP_CHAIN_ID !== base.id) {
-  console.info(
-    `[bankr-app] Running on ${MVP_CHAIN.name} (${MVP_CHAIN_ID}) — testnet/dev mode.`,
+const raw = import.meta.env.VITE_CHAIN_ID;
+if (typeof raw === "string" && raw.trim() !== "" && Number(raw) !== MVP_CHAIN_ID) {
+  console.warn(
+    `[bankr-app] VITE_CHAIN_ID=${raw} is ignored. This MVP is hardcoded to Base mainnet (${MVP_CHAIN_ID}) only.`,
   );
 }
