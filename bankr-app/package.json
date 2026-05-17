@@ -14,6 +14,7 @@
     "verify": "npm run build && node --input-type=module -e \"import { accessSync } from 'node:fs'; accessSync('dist/index.html'); console.log('verify: dist/index.html ok');\""
   },
   "dependencies": {
+    "@0xsplits/splits-sdk": "^6.5.0",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@tanstack/react-query": "^5.62.0",
     "react": "^18.3.1",

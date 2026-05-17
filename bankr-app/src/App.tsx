@@ -33,6 +33,7 @@ import {
   rpcUrlFromEnv,
 } from "./receiptScan";
 import { EscrowWizard } from "./EscrowWizard";
+import { GroupBuyWizard } from "./GroupBuyWizard";
 import {
   formatBankrPoolLabels,
   normalizeLaunchedTicker,
@@ -1773,7 +1774,7 @@ export default function App() {
   const [receiptManualFeeManager, setReceiptManualFeeManager] = useState("");
   const [receiptManualErr, setReceiptManualErr] = useState<string | null>(null);
   const [scanEpoch, setScanEpoch] = useState(0);
-  const [mainTab, setMainTab] = useState<"home" | "profile">("home");
+  const [mainTab, setMainTab] = useState<"home" | "group" | "profile">("home");
 
   useEffect(() => {
     if (!address) {
@@ -2550,6 +2551,15 @@ export default function App() {
             <button
               type="button"
               role="tab"
+              aria-selected={mainTab === "group"}
+              className={`app-tab${mainTab === "group" ? " app-tab--active" : ""}`}
+              onClick={() => setMainTab("group")}
+            >
+              Group Buy
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={mainTab === "profile"}
               className={`app-tab${mainTab === "profile" ? " app-tab--active" : ""}`}
               onClick={() => setMainTab("profile")}
@@ -2715,6 +2725,18 @@ export default function App() {
               </a>
             </p>
           )}
+        </>
+      )}
+
+      {mainTab === "group" && (
+        <>
+          <div className="hero hero--compact">
+            <h1>Group Buy</h1>
+            <p className="muted">
+              Pool ETH with others to buy TMPR fee rights together — or sell a slice of your rights while keeping the rest.
+            </p>
+          </div>
+          <GroupBuyWizard />
         </>
       )}
 

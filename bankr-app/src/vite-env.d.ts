@@ -28,6 +28,8 @@ interface ImportMetaEnv {
   readonly VITE_CLANKER_V4_ESCROW_ADDRESS?: string;
   /** OpenSea collection slug for TMPR (defaults to `tokenmarketplace`). */
   readonly VITE_OPENSEA_COLLECTION_SLUG?: string;
+  /** GroupBuyEscrow contract address on Base. Required for Group Buy tab. */
+  readonly VITE_GROUP_BUY_ESCROW_ADDRESS?: string;
 }
 
 interface ImportMeta {
